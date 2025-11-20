@@ -1,0 +1,57 @@
+<Project Sdk="Microsoft.NET.Sdk.WindowsDesktop">
+  <PropertyGroup>
+    <AssemblyName>PufferFish</AssemblyName>
+    <GenerateAssemblyInfo>False</GenerateAssemblyInfo>
+    <OutputType>WinExe</OutputType>
+    <UseWindowsForms>True</UseWindowsForms>
+    <TargetFramework>net472</TargetFramework>
+    <PlatformTarget>x64</PlatformTarget>
+  </PropertyGroup>
+  <PropertyGroup>
+    <LangVersion>12.0</LangVersion>
+    <AllowUnsafeBlocks>True</AllowUnsafeBlocks>
+  </PropertyGroup>
+  <PropertyGroup>
+    <ApplicationIcon>app.ico</ApplicationIcon>
+    <RootNamespace />
+  </PropertyGroup>
+  <ItemGroup />
+  <ItemGroup>
+    <Reference Include="System.Data.SQLite">
+      <HintPath>..\..\..\Downloads\swisstransfer_f0311e7c-0d30-41a4-8044-8ad37aa96fdb\Pufferfish.1.10.18.0\System.Data.SQLite.dll</HintPath>
+    </Reference>
+    <Reference Include="OxyPlot">
+      <HintPath>..\..\..\Downloads\swisstransfer_f0311e7c-0d30-41a4-8044-8ad37aa96fdb\Pufferfish.1.10.18.0\OxyPlot.dll</HintPath>
+    </Reference>
+    <Reference Include="Numpy">
+      <HintPath>..\..\..\Downloads\swisstransfer_f0311e7c-0d30-41a4-8044-8ad37aa96fdb\Pufferfish.1.10.18.0\Numpy.dll</HintPath>
+    </Reference>
+    <Reference Include="log4net">
+      <HintPath>..\..\..\Downloads\swisstransfer_f0311e7c-0d30-41a4-8044-8ad37aa96fdb\Pufferfish.1.10.18.0\log4net.dll</HintPath>
+    </Reference>
+    <Reference Include="GMap.NET.WindowsForms">
+      <HintPath>..\..\..\Downloads\swisstransfer_f0311e7c-0d30-41a4-8044-8ad37aa96fdb\Pufferfish.1.10.18.0\GMap.NET.WindowsForms.dll</HintPath>
+    </Reference>
+    <Reference Include="OxyPlot.WindowsForms">
+      <HintPath>..\..\..\Downloads\swisstransfer_f0311e7c-0d30-41a4-8044-8ad37aa96fdb\Pufferfish.1.10.18.0\OxyPlot.WindowsForms.dll</HintPath>
+    </Reference>
+    <Reference Include="SevenZip.SDK">
+      <HintPath>..\..\..\Downloads\swisstransfer_f0311e7c-0d30-41a4-8044-8ad37aa96fdb\Pufferfish.1.10.18.0\SevenZip.SDK.dll</HintPath>
+    </Reference>
+    <Reference Include="GMap.NET.Core">
+      <HintPath>..\..\..\Downloads\swisstransfer_f0311e7c-0d30-41a4-8044-8ad37aa96fdb\Pufferfish.1.10.18.0\GMap.NET.Core.dll</HintPath>
+    </Reference>
+    <Reference Include="CyUSB">
+      <HintPath>..\..\..\Downloads\swisstransfer_f0311e7c-0d30-41a4-8044-8ad37aa96fdb\Pufferfish.1.10.18.0\CyUSB.dll</HintPath>
+    </Reference>
+    <Reference Include="System.Data" />
+    <Reference Include="System.Core" />
+    <Reference Include="System.Configuration" />
+    <Reference Include="GeoTimeZone">
+      <HintPath>..\..\..\Downloads\swisstransfer_f0311e7c-0d30-41a4-8044-8ad37aa96fdb\Pufferfish.1.10.18.0\GeoTimeZone.dll</HintPath>
+    </Reference>
+    <Reference Include="TimeZoneConverter">
+      <HintPath>..\..\..\Downloads\swisstransfer_f0311e7c-0d30-41a4-8044-8ad37aa96fdb\Pufferfish.1.10.18.0\TimeZoneConverter.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+</Project>

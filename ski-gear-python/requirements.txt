@@ -1,0 +1,3 @@
+# install them with pip install -r requirements.txt
+
+PySide6
