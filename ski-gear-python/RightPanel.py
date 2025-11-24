@@ -1,6 +1,6 @@
 from PySide6.QtWidgets import (
     QWidget, QLabel, QPushButton, QVBoxLayout,
-    QHBoxLayout, QSlider
+    QHBoxLayout, QSlider, QFrame
 )
 from PySide6.QtCore import Qt
 import Utilities
@@ -30,20 +30,20 @@ class RightPanel(QWidget):
 
         layout = QVBoxLayout(self)
         self.graph_frame = QLabel("[Graph area placeholder]")
-        self.graph_frame.setFrameShape(QLabel.Box)
-        self.graph_frame.setAlignment(Qt.AlignCenter)
+        self.graph_frame.setFrameShape(QFrame.Shape.Box)
+        self.graph_frame.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self.graph_frame, 1)
 
         bottom_layout = QHBoxLayout()
-        self.timeline = QSlider(Qt.Horizontal)
+        self.timeline = QSlider(Qt.Orientation.Horizontal)
         self.timeline.setMinimum(0)
         self.timeline.setMaximum(len(self.path_coords) - 1)
 
-        self.timeline.setTickPosition(QSlider.TicksBelow)
+        self.timeline.setTickPosition(QSlider.TickPosition.TicksBelow)
         self.timeline.setTickInterval(max(1, len(self.path_coords)//10))
         self.timeline.setPageStep(max(1, len(self.path_coords)//20))
 
-        self.timeline.valueChanged[int].connect(self.on_timeline_next)
+        self.timeline.valueChanged.connect(self.on_timeline_next)
         bottom_layout.addWidget(self.timeline)
 
         self.timeline_next_btn = Utilities.createButton(">>", lambda: self.on_timeline_next(self.timeline.value()))

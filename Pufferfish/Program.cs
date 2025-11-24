@@ -12,6 +12,6 @@ internal static class Program
 		XmlConfigurator.Configure();
 		Application.EnableVisualStyles();
 		Application.SetCompatibleTextRenderingDefault(defaultValue: false);
-		Application.Run(new MainForm());
+		Application.Run(new MForm());
 	}
 }

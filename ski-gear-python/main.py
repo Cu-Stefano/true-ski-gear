@@ -7,6 +7,7 @@ import TopBar
 import LeftPanel
 import RightPanel
 import AppMenu
+import matplotlib.pyplot as plt
 
 class MainWindow(QMainWindow):
     
@@ -21,9 +22,6 @@ class MainWindow(QMainWindow):
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
 
-        # Top Menu
-        self.app_menu = AppMenu.AppMenu(self)
-
         # Top bar
         self.top_bar = TopBar.TopBar(self)
         main_layout.addWidget(self.top_bar)
@@ -36,11 +34,16 @@ class MainWindow(QMainWindow):
         self.left_panel = LeftPanel.LeftPanel()
         self.right_panel = RightPanel.RightPanel(self, self.left_panel.map_widget)
         
+        # Top Menu toolBar
+        self.app_menu = AppMenu.AppMenu(self, self.left_panel, self.right_panel)
+        
         center_layout.addWidget(self.left_panel, 1)
         center_layout.addWidget(self.right_panel, 2)
         main_layout.addLayout(center_layout)
 
         self.setCentralWidget(main_widget)
+
+
  
 if __name__ == "__main__":
     app = QApplication(sys.argv)
