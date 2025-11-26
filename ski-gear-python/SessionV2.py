@@ -5,16 +5,11 @@ import time
 from datetime import datetime, timedelta
 from dataclasses import dataclass
 from BaseSession import BaseSession
-import matplotlib
 
 from session_header import SessionHeader
 from sensors_data_1khz import SensorsData1KHZStruct
 from sensors_data_100hz import SensorsData100HZStruct
 from data_header import DataHeader
-
-matplotlib.use("TkAgg")
-from matplotlib.figure import Figure
-from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
 class SessionV2(BaseSession):
 
@@ -476,3 +471,6 @@ class SessionV2(BaseSession):
             "slow": slow_rows,
             "gps": gps_rows
         }
+        
+    def getMainData(self, sensor: int, axis: int):
+        raise NotImplementedError

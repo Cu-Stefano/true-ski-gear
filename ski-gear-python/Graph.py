@@ -1,83 +1,64 @@
-import sys
-import numpy as np
-from PySide6.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout
-from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
-from matplotlib.figure import Figure
 from typing import Iterable, Sequence
+from PySide6.QtWidgets import QWidget, QVBoxLayout
+from PySide6.QtCore import Qt, Signal
+import pyqtgraph as pg
+import numpy as np
+
+class NoRightZoomViewBox(pg.ViewBox):
+    clicked = Signal(float)  # Segnale emesso con la posizione x del click
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def mouseDragEvent(self, ev, axis=None):
+        if ev.button() == Qt.RightButton:
+            # Pan solo sull'asse X
+            diff = ev.pos() - ev.lastPos()
+            dx = diff.x() * 0.005  # riduci la sensibilità 
+            self.translateBy(x=-dx, y=0)
+            ev.accept()
+        else:
+            pos = self.mapToView(ev.pos())
+            self.clicked.emit(pos.x())  # Emetti segnale con posizione x
+            ev.accept()
+            
+    def mouseClickEvent(self, ev):
+        if ev.button() == Qt.LeftButton:
+            pos = self.mapToView(ev.pos())
+            self.clicked.emit(pos.x())  # Emetti segnale con posizione x
+            ev.accept()
 
 
 class Graph(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
-
-        # Layout verticale
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
 
-        # Figura Matplotlib
-        self.figure = Figure(figsize=(5, 3))
-        self.canvas = FigureCanvasQTAgg(self.figure)
+        # PlotWidget con ViewBox personalizzata
+        pg.setConfigOptions(antialias=True)
+        self.plotw = pg.PlotWidget(viewBox=NoRightZoomViewBox(), background='k')
+        self.plotw.showGrid(x=True, y=True, alpha=0.3)
 
-        # Aggiunge canvas al widget
-        layout.addWidget(self.canvas)
+        # rotella: zoom, mouse destro: pan, disabilita pan su Y
+        self.plotw.getViewBox().setMouseEnabled(x=True, y=False)
 
-        # Asse
-        self.ax = self.figure.add_subplot(111)
+        self.curve = self.plotw.plot([], [], pen=pg.mkPen('y', width=1), name='signal')
 
+        self.cursor = pg.InfiniteLine(angle=90, movable=True, pen=pg.mkPen('w', width=1))
+        self.plotw.addItem(self.cursor)
+
+        self.plotw.getViewBox().clicked.connect(self.update_cursor)
+
+        layout.addWidget(self.plotw)
+
+    def update_cursor(self, x):
+        self.cursor.setValue(x)
 
     def plot_example(self):
         t = np.linspace(0, 10, 500)
-        y1 = np.sin(t) * 50 + 100
-        y2 = np.random.normal(0, 5, size=500)
-        y3 = np.cos(t) * 20
-
-        self.ax.clear()
-
-        self.ax.plot(t, y1, color="red")
-        self.ax.plot(t, y2, color="blue")
-        self.ax.plot(t, y3, color="green")
-
-        self.ax.set_title("Grafico in PySide6")
-        self.ax.grid(True)
-
-        self.canvas.draw()
-
-    def set_data(self, x: Iterable[float], y_list: Sequence[Iterable[float]],
-                 colors: Sequence[str] | None = None,
-                 labels: Sequence[str] | None = None,
-                 title: str | None = None) -> None:
-        """Aggiorna il grafico dall'esterno."""
-        self.ax.clear()
-        for i, y in enumerate(y_list):
-            color = (colors[i] if colors and i < len(colors) else None)
-            label = (labels[i] if labels and i < len(labels) else None)
-            self.ax.plot(list(x), list(y), color=color, label=label)
-        if labels:
-            self.ax.legend(loc="upper right")
-        if title:
-            self.ax.set_title(title)
-        self.ax.grid(True)
-        self.canvas.draw_idle()
-
-
-class MainWindow(QMainWindow):
-    def __init__(self):
-        super().__init__()
-
-        self.setWindowTitle("Matplotlib in PySide6")
-
-        # Crea widget grafico
-        self.graph = Graph()
-        self.setCentralWidget(self.graph)
-
-        # Disegna dati di prova
-        self.graph.plot_example()
-
-
-if __name__ == "__main__":
-    app = QApplication(sys.argv)
-
-    w = MainWindow()
-    w.resize(900, 500)
-    w.show()
-
-    sys.exit(app.exec())
+        y = np.sin(t) * 50 + 100
+        self.curve.setData(t, y)
+        self.plotw.setTitle("Grafico (unico, giallo)", color='w')
+        self.cursor.setValue(t[len(t)//2])
+        self.plotw.enableAutoRange(axis=pg.ViewBox.XYAxes, enable=True)

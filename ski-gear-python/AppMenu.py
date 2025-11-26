@@ -12,9 +12,6 @@ class AppMenu:
         self.menu = self.main_window.menuBar()
         self.create_menu()
 
-        # Facoltativo: costruisci subito un grafico di prova
-        # self.right_panel.build_dummy()
-
     def Actions_button_clicked(self):
         print("Actions button clicked")
 
@@ -31,7 +28,10 @@ class AppMenu:
             deviceID = 0
             sessionID = 0
             sV2 = SessionV2.SessionV2(deviceID, sessionID, selected_file, self.right_panel)
-            session_data = sV2.ReadSessionFromFileV2(selected_file)
+            sV2.ReadSessionFromFileV2(selected_file)
+            # for i in range(3):
+            # sV2.get_main_data(0, 0)
+            
             
 
     def create_menu(self):
