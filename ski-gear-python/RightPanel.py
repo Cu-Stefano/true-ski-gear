@@ -4,6 +4,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt
 import Utilities
+import Graph
  
 class RightPanel(QWidget):
 
@@ -29,9 +30,9 @@ class RightPanel(QWidget):
         ]
 
         layout = QVBoxLayout(self)
-        self.graph_frame = QLabel("[Graph area placeholder]")
-        self.graph_frame.setFrameShape(QFrame.Shape.Box)
-        self.graph_frame.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.graph_frame = Graph.Graph()
+        # self.graph_frame.setFrameShape(QFrame.Shape.Box)
+        # self.graph_frame.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self.graph_frame, 1)
 
         bottom_layout = QHBoxLayout()
@@ -50,3 +51,8 @@ class RightPanel(QWidget):
         bottom_layout.addWidget(self.timeline_next_btn)
         layout.addLayout(bottom_layout)
         self.setLayout(layout)
+
+    # ----- API pubblica per aggiornare il grafico dall'esterno -----
+    def set_graph_data(self, x, y_list, *, colors=None, labels=None, title=None):
+        """Inoltra i dati al widget grafico interno."""
+        self.graph_frame.set_data(x, y_list, colors=colors, labels=labels, title=title)

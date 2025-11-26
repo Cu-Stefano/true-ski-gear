@@ -3,6 +3,8 @@ import sqlite3
 from abc import ABC, abstractmethod
 from datetime import datetime, timedelta
 from typing import List, Iterable
+from GPSData import GPSData
+from GraphDataSource import DataPoint
 from dataclasses import dataclass
 import GraphDataSource
 
@@ -17,23 +19,6 @@ class Tag:
     @classmethod
     def create(cls, id: int, type: str, description: str) -> "Tag":
         return cls(id=id, type=type, description=description, timestamp=datetime.utcnow())
-
-@dataclass
-class DataPoint:
-    x: float
-    y: float
-    
-@dataclass
-class GPSCoords:
-    lat: float
-    lng: float
-
-@dataclass
-class GPSData:
-    index: int
-    time: float          # milliseconds
-    coords: GPSCoords
-    valid: bool = True
 
 class BaseSession(ABC):
     SESSION_V1 = 1
@@ -121,7 +106,7 @@ class BaseSession(ABC):
 
     def get_main_data(self, sensor: int, axis: int) -> Iterable[DataPoint]:
         # axis retained for compatibility; underlying method expects only one positional argument
-        return self.graph_data.get_main_data(sensor)
+        return self.graph_data.get_main_data(sensor, axis)
 
     def get_speed_data(self) -> Iterable[DataPoint]:
         return self.graph_data.get_speed_data()
@@ -149,16 +134,16 @@ class BaseSession(ABC):
     # Latitude/longitude min/max
     # -------------------------------
     def get_max_lat(self):
-        return max((g.coords.lat for g in self.gps_data), default=0.0)
+        return max((g.coords.Lat for g in self.gps_data), default=0.0)
 
     def get_min_lat(self):
-        return min((g.coords.lat for g in self.gps_data), default=0.0)
+        return min((g.coords.Lat for g in self.gps_data), default=0.0)
 
     def get_max_lng(self):
-        return max((g.coords.lng for g in self.gps_data), default=0.0)
+        return max((g.coords.Lng for g in self.gps_data), default=0.0)
 
     def get_min_lng(self):
-        return min((g.coords.lng for g in self.gps_data), default=0.0)
+        return min((g.coords.Lng for g in self.gps_data), default=0.0)
 
     @staticmethod
     def get_db_folder() -> str:

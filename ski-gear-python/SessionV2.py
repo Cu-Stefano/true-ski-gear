@@ -4,8 +4,7 @@ import struct
 import time
 from datetime import datetime, timedelta
 from dataclasses import dataclass
-from BaseSession import BaseSession, GPSData, GPSCoords
-from GraphDataSource import DataPoint
+from BaseSession import BaseSession
 import matplotlib
 
 from session_header import SessionHeader

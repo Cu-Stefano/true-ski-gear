@@ -43,10 +43,20 @@ class MainWindow(QMainWindow):
 
         self.setCentralWidget(main_widget)
 
-
  
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     w = MainWindow()
+    # --- Modifica il grafico di RightPanel dall'esterno (qui in main) ---
+    import numpy as np
+    t = np.linspace(0, 10, 500)
+    y1 = np.sin(t) * 50 + 100
+    y2 = np.cos(t) * 20
+    w.right_panel.set_graph_data(t, [y1, y2],
+                                 colors=["#ff3333", "#3388ff"],
+                                 labels=["sin", "cos"],
+                                 title="Demo (aggiornato da main)")
+    # ---------------------------------------------------------------
+    
     w.show()
     sys.exit(app.exec())
