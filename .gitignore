@@ -3,6 +3,8 @@
 ##
 ## Get latest from https://github.com/github/gitignore/blob/master/VisualStudio.gitignore
 
+ski-gear-python/cadute
+
 # User-specific files
 *.rsuser
 *.suo
@@ -712,3 +714,4 @@ $RECYCLE.BIN/
 .DS_Store
 
 _NCrunch*
+ski-gear-python/cadute/0103 Apertura in funivia/20250228_313_453.dat

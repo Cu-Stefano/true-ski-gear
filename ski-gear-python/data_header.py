@@ -1,9 +1,6 @@
 from dataclasses import dataclass
 import struct
 
-# C# DataHeader: byte type; byte size
-# LayoutKind.Sequential, Pack=1 => no padding
-# Format: <BB (little-endian)
 _DATA_HEADER_STRUCT = struct.Struct("<BB")
 
 @dataclass

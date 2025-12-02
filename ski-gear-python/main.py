@@ -1,6 +1,7 @@
 import sys
 import numpy as np
 from PySide6.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout
+import pyqtgraph as pg
 import TopBar
 import LeftPanel
 import RightPanel
@@ -37,10 +38,12 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(main_widget)
 
 if __name__ == "__main__":
+
+    pg.setConfigOptions(antialias=True)
+
     app = QApplication(sys.argv)
     w = MainWindow()
 
-    # Demo: unico segnale giallo
     t = np.linspace(0, 10, 500)
     y = np.sin(t) * 50 + 100
 

@@ -1,7 +1,6 @@
 from dataclasses import dataclass
 import struct
 
-# TimeStamp: uint msec
 _TIMESTAMP_STRUCT = struct.Struct("<I")
 
 @dataclass

@@ -1,15 +1,18 @@
 import os
 import sqlite3
-import struct
+import ctypes
+from typing import Type, BinaryIO
 import time
 from datetime import datetime, timedelta
 from dataclasses import dataclass
 from BaseSession import BaseSession
-
+import numpy as np
 from session_header import SessionHeader
 from sensors_data_1khz import SensorsData1KHZStruct
 from sensors_data_100hz import SensorsData100HZStruct
 from data_header import DataHeader
+import pyqtgraph as pg
+from Graph import NoRightZoomViewBox
 
 class SessionV2(BaseSession):
 
@@ -24,8 +27,8 @@ class SessionV2(BaseSession):
     speed_index = 6
     
     def __init__(self, device_id: int, session_id: int, filename: str, right_panel=None):
-        super().__init__(nofgraphs=9, nofsensors=4)
-        self.session_version = 2
+        super().__init__(nofgraphs=9, nofsensors=5)
+        self.session_version = 2 # ancora da capire perchè esiste una sessione v1 e v2
         self.right_panel = right_panel
         self.device_id = device_id
         self.session_id = session_id
@@ -36,12 +39,8 @@ class SessionV2(BaseSession):
         self.conn = sqlite3.connect(dbfile)
         self.conn.execute("PRAGMA journal_mode=WAL;")
 
-        # ------------------------------------------------------------------
-        # Create tables and indexes EXACTLY matching C# (names & attributes)
-        # ------------------------------------------------------------------
         self._create_schema()
 
-        # Prepare reusable insert statements (matching C# column order)
         self.fast_insert_sql = (
             "INSERT INTO fastSensors "
             "(dataIndex, acc_x, acc_y, acc_z, gyro_x, gyro_y, gyro_z, activation, Timestamp) "
@@ -67,6 +66,10 @@ class SessionV2(BaseSession):
         self.cur_fast = self.conn.cursor()
         self.cur_slow = self.conn.cursor()
         self.cur_gps = self.conn.cursor()
+        
+        # Track data-index range for plotting
+        self.MinIndex = 0
+        self.MaxIndex = 0
 
     def _create_schema(self):
         if self.conn is None:
@@ -147,7 +150,6 @@ class SessionV2(BaseSession):
         dbname = os.path.splitext(basename)[0] + ".db"
         return os.path.join(folder, dbname)
 
-    # ---------------- Timestamp logic (mirrors C# GenerateSessionTimestampFromUSec) ----------
     def _base_date(self):
         if not self.header or self.header.year == 0:
             return datetime.utcfromtimestamp(0)
@@ -188,113 +190,100 @@ class SessionV2(BaseSession):
                 f.seek(-1, 1)
 
                 try:
-                    if msg_type == self.MSG_SESS:
-                        raw = f.read(40)
-                        if len(raw) < 40:
-                            break
-                        self.header = SessionHeader.parse(raw)
+                    match msg_type:
+                        case self.MSG_SESS:  # 4
+                            # Do NOT pre-read raw; let parser read from stream
+                            self.header = SessionHeader.from_file(f)
 
-                    elif msg_type == self.MSG_1KHZ:
-                        raw = f.read(22)
-                        if len(raw) < 22:
-                            break
-                        one = SensorsData1KHZStruct.parse(raw)
-                        acc_scale = self.header.acc_full_scale / 32768.0 if self.header else 1.0
-                        if self.header:
-                            fs = self.header.gyro_full_scale
-                            gyro_scale = 0.07 if fs == 2000 else (0.035 if fs == 1000 else (7.0/800.0 if fs == 500 else 0.004375))
-                        else:
-                            gyro_scale = 1.0
-                        ax, ay, az = [v * acc_scale for v in one.data.acc]
-                        gx, gy, gz = [v * gyro_scale for v in one.data.gyro]
-                        ts = self._ts_from_usec(one.t.msec * 100.0)
-                        activation = getattr(one.data, "activation", 0)
+                        case self.MSG_1KHZ:  # 13
+                            one = SensorsData1KHZStruct.from_file(f)
 
-                        self.cur_fast.execute(
-                            self.fast_insert_sql,
-                            (
-                                data_index,
-                                ax, ay, az,
-                                gx, gy, gz,
-                                activation,
-                                ts.isoformat(sep=' ')
-                            )
-                        )
+                            acc_scale = (self.header.acc_full_scale / 32768.0) if self.header else 1.0
+                            if self.header:
+                                fs = self.header.gyro_full_scale
+                                gyro_scale = 0.07 if fs == 2000 else (0.035 if fs == 1000 else (7.0 / 800.0 if fs == 500 else 0.004375))
+                            else:
+                                gyro_scale = 1.0
 
-                    elif msg_type == self.MSG_100HZ:
-                        raw_header = f.read(2)
-                        if len(raw_header) < 2:
-                            break
-                        dh = DataHeader.parse(raw_header)
-                        f.seek(-2, 1)
-                        # Minimum legacy size 74, else dh.size
-                        size_to_read = max(74, dh.size)
-                        raw = f.read(size_to_read)
-                        if len(raw) < 74:
-                            break
-                        hundred = SensorsData100HZStruct.parse(raw)
+                            ax, ay, az = [v * acc_scale for v in one.data.acc]
+                            gx, gy, gz = [v * gyro_scale for v in one.data.gyro]
+                            ts = self._ts_from_usec(one.t.msec * 100.0)
+                            activation = getattr(one.data, "activation", 0)
 
-                        acc_scale = self.header.acc_full_scale / 32768.0 if self.header else 1.0
-                        mag_scale = self.header.mag_full_scale / 32768.0 if (self.header and self.header.mag_full_scale) else 1.0
-                        ts = self._ts_from_usec(hundred.t.msec * 100.0)
-
-                        acc_vals = hundred.data.acc  # 12 values (4 * 3)
-                        acc0 = [acc_vals[0] * acc_scale, acc_vals[1] * acc_scale, acc_vals[2] * acc_scale]
-                        acc1 = [acc_vals[3] * acc_scale, acc_vals[4] * acc_scale, acc_vals[5] * acc_scale]
-                        acc2 = [acc_vals[6] * acc_scale, acc_vals[7] * acc_scale, acc_vals[8] * acc_scale]
-                        acc3 = [acc_vals[9] * acc_scale, acc_vals[10] * acc_scale, acc_vals[11] * acc_scale]
-
-                        mag_x = mag_y = mag_z = None
-                        if hundred.data.mag:
-                            mag_x, mag_y, mag_z = [v * mag_scale for v in hundred.data.mag]
-
-                        rot_x = rot_y = rot_z = None
-                        if hundred.data.rotation:
-                            import math
-                            a_deg, b_deg, g_deg = hundred.data.rotation
-                            a = a_deg / 360.0 * 2.0 * math.pi
-                            b = b_deg / 360.0 * 2.0 * math.pi
-                            g = g_deg / 360.0 * 2.0 * math.pi
-                            rot_x = math.cos(a) * math.sin(b) * math.cos(g) + math.sin(a) * math.sin(g)
-                            rot_y = math.sin(a) * math.sin(b) * math.cos(g) - math.cos(a) * math.sin(g)
-                            rot_z = math.cos(b) * math.cos(g)
-
-                        grav_x = grav_y = grav_z = None
-                        if hundred.data.gravity:
-                            grav_x, grav_y, grav_z = hundred.data.gravity
-
-                        activation = getattr(hundred.data, "activation", 0)
-
-                        self.cur_slow.execute(
-                            self.slow_insert_sql,
-                            (
-                                data_index,
-                                *acc0, *acc1, *acc2, *acc3,
-                                mag_x, mag_y, mag_z,
-                                rot_x, rot_y, rot_z,
-                                grav_x, grav_y, grav_z,
-                                activation,
-                                ts.isoformat(sep=' ')
-                            )
-                        )
-
-                        # GPS (only if latitude != 0 like C#)
-                        if hundred.data.latitude != 0.0:
-                            self.cur_gps.execute(
-                                self.gps_insert_sql,
+                            self.cur_fast.execute(
+                                self.fast_insert_sql,
                                 (
                                     data_index,
-                                    hundred.data.latitude,
-                                    hundred.data.longitude,
-                                    hundred.data.speed,
-                                    ts.isoformat(sep=' ')
-                                )
+                                    ax, ay, az,
+                                    gx, gy, gz,
+                                    activation,
+                                    ts.isoformat(sep=" "),
+                                ),
                             )
-                        else:
-                            # Still log warning style (optional)
-                            pass
-                    else:
-                        f.read(1)  # consume unsupported type
+
+                        case self.MSG_100HZ:  # 14
+                            hundred = SensorsData100HZStruct.from_file(f)
+
+                            acc_scale = (self.header.acc_full_scale / 32768.0) if self.header else 1.0
+                            mag_scale = (self.header.mag_full_scale / 32768.0) if (self.header and self.header.mag_full_scale) else 1.0
+                            ts = self._ts_from_usec(hundred.t.msec * 100.0)
+
+                            acc_vals = hundred.data.acc
+                            acc0 = [acc_vals[0] * acc_scale, acc_vals[1] * acc_scale, acc_vals[2] * acc_scale]
+                            acc1 = [acc_vals[3] * acc_scale, acc_vals[4] * acc_scale, acc_vals[5] * acc_scale]
+                            acc2 = [acc_vals[6] * acc_scale, acc_vals[7] * acc_scale, acc_vals[8] * acc_scale]
+                            acc3 = [acc_vals[9] * acc_scale, acc_vals[10] * acc_scale, acc_vals[11] * acc_scale]
+
+                            mag_x = mag_y = mag_z = None
+                            if hundred.data.mag:
+                                mag_x, mag_y, mag_z = [v * mag_scale for v in hundred.data.mag]
+
+                            rot_x = rot_y = rot_z = None
+                            if hundred.data.rotation:
+                                import math
+                                a_deg, b_deg, g_deg = hundred.data.rotation
+                                a = a_deg / 360.0 * 2.0 * math.pi
+                                b = b_deg / 360.0 * 2.0 * math.pi
+                                g = g_deg / 360.0 * 2.0 * math.pi
+                                rot_x = math.cos(a) * math.sin(b) * math.cos(g) + math.sin(a) * math.sin(g)
+                                rot_y = math.sin(a) * math.sin(b) * math.cos(g) - math.cos(a) * math.sin(g)
+                                rot_z = math.cos(b) * math.cos(g)
+
+                            grav_x = grav_y = grav_z = None
+                            if hundred.data.gravity:
+                                grav_x, grav_y, grav_z = hundred.data.gravity
+
+                            activation = getattr(hundred.data, "activation", 0)
+
+                            self.cur_slow.execute(
+                                self.slow_insert_sql,
+                                (
+                                    data_index,
+                                    *acc0, *acc1, *acc2, *acc3,
+                                    mag_x, mag_y, mag_z,
+                                    rot_x, rot_y, rot_z,
+                                    grav_x, grav_y, grav_z,
+                                    activation,
+                                    ts.isoformat(sep=" "),
+                                ),
+                            )
+
+                            if getattr(hundred.data, "latitude", 0.0) != 0.0:
+                                self.cur_gps.execute(
+                                    self.gps_insert_sql,
+                                    (
+                                        data_index,
+                                        hundred.data.latitude,
+                                        hundred.data.longitude,
+                                        hundred.data.speed,
+                                        ts.isoformat(sep=" "),
+                                    ),
+                                )
+                            else:
+                                pass
+
+                        case _:
+                            f.read(1)  # consume unsupported type and continue
 
                 except Exception as e:
                     print(f"Parse error at index {data_index}: {e}")
@@ -474,3 +463,354 @@ class SessionV2(BaseSession):
         
     def getMainData(self, sensor: int, axis: int):
         raise NotImplementedError
+    
+    def getGravityData(self, axis: int):
+        self.graph_data.get_gravity_data(axis)
+        
+    def get_gravity_series(self, min_index: int | None = None, max_index: int | None = None, axis: int | None = None):
+        """
+        Returns (x, y) numpy arrays for gravity axis in the given range.
+        """
+        if self.conn is None:
+            return np.array([]), np.array([])
+
+        if axis is None:
+            axis = getattr(self, "_gravity_axis", 2)
+
+        if min_index is None:
+            min_index = int(self.MinIndex)
+        if max_index is None:
+            max_index = int(self.MaxIndex)
+
+        # Choose the column based on axis
+        col = "grav_x" if axis == 0 else ("grav_y" if axis == 1 else "grav_z")
+        sql = (
+            f"SELECT dataIndex, {col} "
+            "FROM slowSensors WHERE dataIndex BETWEEN ? AND ? "
+            "ORDER BY dataIndex"
+        )
+        rows = []
+        try:
+            rows = list(self.conn.execute(sql, (min_index, max_index)))
+        except Exception as e:
+            print(f"get_gravity_series error: {e}")
+
+        if not rows:
+            return np.array([]), np.array([])
+
+        x = np.array([r[0] for r in rows], dtype=float)
+        y = np.array([r[1] if r[1] is not None else float('nan') for r in rows], dtype=float)
+        return x, y
+    
+    def get_speed_series(self, min_index: int | None = None, max_index: int | None = None):
+        if self.conn is None:
+            return np.array([]), np.array([])
+
+        if min_index is None:
+            min_index = int(self.MinIndex)
+        if max_index is None:
+            max_index = int(self.MaxIndex)
+
+        sql = (
+            "SELECT dataIndex, speed FROM gpssensors "
+            "WHERE dataIndex BETWEEN ? AND ? ORDER BY dataIndex"
+        )
+        rows = []
+        try:
+            rows = list(self.conn.execute(sql, (min_index, max_index)))
+        except Exception as e:
+            print(f"get_speed_series error: {e}")
+
+        if not rows:
+            return np.array([]), np.array([])
+
+        x = np.array([r[0] for r in rows], dtype=float)
+        y = np.array([r[1] for r in rows], dtype=float)
+        return x, y
+
+    # --------- NUOVI HELPER PER LETTURA SERIE DAL DB ---------
+    def _get_series_from_db(self, sql: str, params: tuple):
+        rows = []
+        try:
+            rows = list(self.conn.execute(sql, params))
+        except Exception as e:
+            print(f"_get_series_from_db error: {e}")
+        if not rows:
+            return np.array([]), np.array([])
+        x = np.asarray([r[0] for r in rows], dtype=float)
+        y = np.asarray([r[1] for r in rows], dtype=float)
+        return x, y
+
+    def get_fast_acc_series(self, min_index: int | None = None, max_index: int | None = None, axis: int = 0):
+        if self.conn is None:
+            return np.array([]), np.array([])
+        if min_index is None: min_index = int(self.MinIndex)
+        if max_index is None: max_index = int(self.MaxIndex)
+        col = "acc_x" if axis == 0 else ("acc_y" if axis == 1 else "acc_z")
+        sql = f"SELECT dataIndex, {col} FROM fastSensors WHERE dataIndex BETWEEN ? AND ? ORDER BY dataIndex"
+        return self._get_series_from_db(sql, (min_index, max_index))
+
+    def get_gyro_series(self, min_index: int | None = None, max_index: int | None = None, axis: int = 0):
+        if self.conn is None:
+            return np.array([]), np.array([])
+        if min_index is None: min_index = int(self.MinIndex)
+        if max_index is None: max_index = int(self.MaxIndex)
+        col = "gyro_x" if axis == 0 else ("gyro_y" if axis == 1 else "gyro_z")
+        sql = f"SELECT dataIndex, {col} FROM fastSensors WHERE dataIndex BETWEEN ? AND ? ORDER BY dataIndex"
+        return self._get_series_from_db(sql, (min_index, max_index))
+
+    def get_slow_acc_series(self, sensor_idx: int, min_index: int | None = None, max_index: int | None = None, axis: int = 0):
+        # sensor_idx: 0..3 corrispondono a Acc 1..4
+        if self.conn is None:
+            return np.array([]), np.array([])
+        sensor_idx = max(0, min(3, int(sensor_idx)))
+        if min_index is None: min_index = int(self.MinIndex)
+        if max_index is None: max_index = int(self.MaxIndex)
+        ax = "x" if axis == 0 else ("y" if axis == 1 else "z")
+        col = f"acc_{sensor_idx}_{ax}"
+        sql = f"SELECT dataIndex, {col} FROM slowSensors WHERE dataIndex BETWEEN ? AND ? ORDER BY dataIndex"
+        return self._get_series_from_db(sql, (min_index, max_index))
+
+    def get_pose_series(self, min_index: int | None = None, max_index: int | None = None, axis: int = 0):
+        # Pose = rot_x/y/z da slowSensors
+        if self.conn is None:
+            return np.array([]), np.array([])
+        if min_index is None: min_index = int(self.MinIndex)
+        if max_index is None: max_index = int(self.MaxIndex)
+        col = "rot_x" if axis == 0 else ("rot_y" if axis == 1 else "rot_z")
+        sql = f"SELECT dataIndex, {col} FROM slowSensors WHERE dataIndex BETWEEN ? AND ? ORDER BY dataIndex"
+        return self._get_series_from_db(sql, (min_index, max_index))
+
+    def InitSessionPlotModel(self, series, axis: int = 2):
+        """
+        Inizializza un layout pyqtgraph con 9 pannelli impilati (Pose, Gravity, Acc1..4, Main, Gyro, Speed),
+        assi X condivisi, serie e linee verticali per ciascun pannello.
+        Aggiorna 'series' (list di liste) con i PlotDataItem corrispondenti.
+        """
+        LINE_WIDTH = 1.0
+        CURSOR_WIDTH = 1.0
+        # Parametri
+        nofsensors = 5
+        nofgraphs = 9
+        gyro_index = self.gyro_index            # 5
+        speed_index = self.speed_index          # 6
+
+        # Helper: formatter tempo (ms) -> (mm:ss.mmm) 
+        def default_time_formatter(v: float) -> str:
+            try:
+                seconds = float(v) / 1000.0
+                m = int(seconds // 60)
+                s = seconds % 60.0
+                return f"{m:02d}:{s:06.3f}"
+            except Exception:
+                return f"{v:.0f}"
+
+        class TimeAxis(pg.AxisItem):
+            def __init__(self, *args, **kwargs):
+                self._formatter = kwargs.pop("formatter", None)
+                super().__init__(*args, **kwargs)
+            def tickStrings(self, values, scale, spacing):
+                if self._formatter:
+                    return [self._formatter(v) for v in values]
+                return super().tickStrings(values, scale, spacing)
+
+        pg.setConfigOptions(antialias=True)
+        glw = pg.GraphicsLayoutWidget(show=False)
+        glw.ci.setContentsMargins(0, 0, 0, 0)
+        glw.ci.layout.setSpacing(0) 
+        try:
+            glw.ci.setBorder(None)
+        except Exception:
+            pass
+
+        if self.right_panel is not None:
+            try:
+                layout = self.right_panel.layout()
+                if hasattr(self.right_panel, "graph_frame") and self.right_panel.graph_frame is not None:
+                    old = self.right_panel.graph_frame
+                    layout.replaceWidget(old, glw)
+                    old.deleteLater()
+                else:
+                    layout.insertWidget(0, glw)
+                self.right_panel.graph_frame = glw
+            except Exception:
+                pass
+
+        comp_colors = ['r', 'g', 'b']
+        
+        pane_titles = [
+            "Speed",
+            "Gyro",
+            "Main",
+            "Acc 1",
+            "Acc 2",
+            "Acc 3",
+            "Acc 4",
+            "Gravity",
+            "Pose"
+        ]
+
+        bucket_order_visual_to_series = {
+            "Speed":       speed_index,
+            "Gyro":        gyro_index,
+            "Main":        0,
+            "Acc 1":       1,
+            "Acc 2":       2,
+            "Acc 3":       3,
+            "Acc 4":       4,
+            "Gravity":     8,
+            "Pose":        7,
+        }
+        plots = []
+        vlines = []
+        
+        bottom_axis = TimeAxis(orientation='bottom', formatter=default_time_formatter)
+        for row, title in enumerate(pane_titles):
+            vb = NoRightZoomViewBox()
+            vb.setDefaultPadding(0.0)
+            if title == pane_titles[-1]:
+                p = pg.PlotItem(viewBox=vb, axisItems={'bottom': bottom_axis})
+            else:
+                p = pg.PlotItem(viewBox=vb)
+
+            try:
+                p.layout.setContentsMargins(0, 0, 0, 0)
+                p.setDefaultPadding(0.0)
+            except Exception:
+                pass
+
+            p.setLabel('left', title, color='w')
+            p.getAxis('left').setTextPen('w')
+            p.getAxis('left').setPen('w')
+            try:
+                p.getAxis('left').setWidth(40)
+            except Exception:
+                pass
+
+            if title != pane_titles[-1]:
+                p.setLimits(xMin=0.0, minXRange=500.0, maxXRange=300000.0)
+                p.getAxis('bottom').setStyle(showValues=False)
+                p.getAxis('bottom').setHeight(0)
+                # p.getAxis('bottom').setPen(None)
+            else:
+                p.setLimits(xMin=0.0, minXRange=500.0, maxXRange=300000.0)
+                p.getAxis('bottom').setTextPen('w')
+                p.getAxis('bottom').setPen('w')
+
+            if title == "Speed":
+                p.showGrid(x=False, y=False, alpha=0.3)
+            else:
+                p.showGrid(x=False, y=False, alpha=0.3)
+
+            vb.setMouseEnabled(x=True, y=False)
+
+            glw.addItem(p)
+            if row < len(pane_titles) - 1:
+                glw.nextRow()
+
+            plots.append(p)
+
+        bottom_plot = plots[-1]
+        bottom_plot.getViewBox().setDefaultPadding(0.0)
+        for p in plots[:-1]:
+            p.getViewBox().setDefaultPadding(0.0)
+            p.setXLink(bottom_plot)
+
+        if not series or len(series) != nofgraphs:
+            series.clear()
+            series.extend([0] * nofgraphs)
+
+        red_pen = pg.mkPen('r', width=LINE_WIDTH)
+        green_pen = pg.mkPen('g', width=LINE_WIDTH)
+        blue_pen = pg.mkPen('b', width=LINE_WIDTH)
+        white_pen = pg.mkPen('w', width=CURSOR_WIDTH)
+        self._line_annotations = []
+        vlines = []
+
+
+        def _sync_lines(moved_line):
+            try:
+                x = moved_line.value()
+                for ln in vlines:
+                    if ln is moved_line:
+                        continue
+                    ln.blockSignals(True)
+                    ln.setValue(x)
+                    ln.blockSignals(False)
+            except Exception:
+                pass
+
+        white_pen = pg.mkPen('w', width=CURSOR_WIDTH)
+        for p in plots:
+            ln = pg.InfiniteLine(angle=90, movable=True, pen=white_pen)
+            ln.sigPositionChanged.connect(lambda _, l=ln: _sync_lines(l))
+            p.addItem(ln)
+            vlines.append(ln)
+            self._line_annotations.append(ln)
+
+        try:
+            mid = (self.MinIndex + self.MaxIndex) / 2.0
+            for ln in vlines:
+                ln.setValue(mid)
+        except Exception:
+            pass
+        
+        def add_curves_to_plot(plot_item: pg.PlotItem, count: int, pens: list[pg.QtGui.QPen]):
+            items = []
+            for i in range(count):
+                it = pg.PlotDataItem(pen=pens[i])
+                try:
+                    it.setClipToView(True)
+                    it.setDownsampling(1, True, mode='subsample')
+                    it.setAutoDownsample(True)
+                except Exception:
+                    pass
+                plot_item.addItem(it)
+                items.append(it)
+            return items
+
+        pens3 = [red_pen, green_pen, blue_pen]
+        for name in ("Main", "Acc 1", "Acc 2", "Acc 3", "Acc 4"):
+            bucket = bucket_order_visual_to_series[name]
+            plot_idx = pane_titles.index(name)
+            curves = add_curves_to_plot(plots[plot_idx], 3, pens3)
+            series[bucket] = curves
+            
+        gyro_bucket = bucket_order_visual_to_series["Gyro"]
+        gyro_plot_idx = pane_titles.index("Gyro")
+        series[gyro_bucket] = add_curves_to_plot(plots[gyro_plot_idx], 3, pens3)
+
+        speed_bucket = bucket_order_visual_to_series["Speed"]
+        speed_plot_idx = pane_titles.index("Speed")
+        series[speed_bucket] = add_curves_to_plot(plots[speed_plot_idx], 1, [red_pen])
+
+        pose_bucket = bucket_order_visual_to_series["Pose"]
+        pose_plot_idx = pane_titles.index("Pose")
+        series[pose_bucket] = add_curves_to_plot(plots[pose_plot_idx], 3, pens3)
+
+        grav_bucket = bucket_order_visual_to_series["Gravity"]
+        grav_plot_idx = pane_titles.index("Gravity")
+        series[grav_bucket] = add_curves_to_plot(plots[grav_plot_idx], 3, pens3)
+
+        try:
+            mid = (self.MinIndex + self.MaxIndex) / 2.0
+            for sl in vlines[1:]:
+                sl.setValue(mid)
+        except Exception:
+            pass
+
+        def _apply_lod():
+            try:
+                vb = bottom_plot.getViewBox()
+                x0, x1 = vb.viewRange()[0]
+                target_pts = 2000
+                step = max(1, int((x1 - x0) / max(1.0, target_pts)))
+            except Exception:
+                pass
+
+        try:
+            bottom_plot.getViewBox().sigXRangeChanged.connect(lambda *_: _apply_lod())
+        except Exception:
+            pass
+
+    

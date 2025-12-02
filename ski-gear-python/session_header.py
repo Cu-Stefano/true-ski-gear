@@ -1,13 +1,15 @@
 from dataclasses import dataclass
 import struct
+from typing import BinaryIO
 try:
     from .data_header import DataHeader
+    from .binary_utils import read_exact
 except ImportError:
     from data_header import DataHeader
+    from binary_utils import read_exact
 
-# After DataHeader (2 bytes), 38 bytes:
-# <III3B4HB5HI
-_SESSION_HEADER_STRUCT = struct.Struct("<III3B4HB5HI")
+_AFTER_HEADER_STRUCT = struct.Struct("<III3B4HB5HI")
+TOTAL_SIZE = DataHeader.__annotations__ and 2 + _AFTER_HEADER_STRUCT.size  # 2 + 38 = 40
 
 @dataclass
 class SessionHeader:
@@ -31,21 +33,40 @@ class SessionHeader:
     activations: int
 
     @classmethod
-    def parse(cls, b: bytes):
-        if len(b) < 40:
-            raise ValueError("Not enough bytes for SessionHeader")
-        header = DataHeader.parse(b[0:2])
-        (id_, board_id, fw_version,
-         day, month, year,
-         acc_full_scale, acc_rate, ext_acc_full_scale, ext_acc_rate,
+    def from_file(cls, f: BinaryIO) -> "SessionHeader":
+        # Read DataHeader
+        dh_raw = read_exact(f, 2)
+        header = DataHeader.parse(dh_raw)
+        if header.type != 4:
+            raise ValueError(f"Unexpected SessionHeader type {header.type} != 4")
+        # header.size should be size of (TimeStamp + payload) for other structs, but
+        # for SessionHeader we expect fixed total size (40). Accept either 40 or 38 (without DataHeader).
+        if header.size not in (38, 40):
+            # Accept legacy writer mistakes only if you decide so; here we enforce.
+            raise ValueError(f"Unexpected SessionHeader size field {header.size}")
+        rest = read_exact(f, _AFTER_HEADER_STRUCT.size)
+        (id_,
+         board_id,
+         fw_version,
+         day,
+         month,
+         year,
+         acc_full_scale,
+         acc_rate,
+         ext_acc_full_scale,
+         ext_acc_rate,
          ext_status,
-         gyro_full_scale, gyro_rate, mag_full_scale, mag_rate, gps_rate,
-         activations) = _SESSION_HEADER_STRUCT.unpack_from(b, 2)
-        return cls(header=header, id=id_, board_id=board_id, fw_version=fw_version,
-                   day=day, month=month, year=year,
-                   acc_full_scale=acc_full_scale, acc_rate=acc_rate,
-                   ext_acc_full_scale=ext_acc_full_scale, ext_acc_rate=ext_acc_rate,
-                   ext_status=ext_status,
-                   gyro_full_scale=gyro_full_scale, gyro_rate=gyro_rate,
-                   mag_full_scale=mag_full_scale, mag_rate=mag_rate,
-                   gps_rate=gps_rate, activations=activations)
+         gyro_full_scale,
+         gyro_rate,
+         mag_full_scale,
+         mag_rate,
+         gps_rate,
+         activations) = _AFTER_HEADER_STRUCT.unpack(rest)
+        return cls(header, id_, board_id, fw_version,
+                   day, month, year,
+                   acc_full_scale, acc_rate,
+                   ext_acc_full_scale, ext_acc_rate,
+                   ext_status,
+                   gyro_full_scale, gyro_rate,
+                   mag_full_scale, mag_rate,
+                   gps_rate, activations)

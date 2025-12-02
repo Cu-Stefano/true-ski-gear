@@ -1,7 +1,7 @@
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QSlider
 from PySide6.QtCore import Qt
 import Graph
-import Utilities  # si assume esista
+import Utilities
 
 class RightPanel(QWidget):
     def __init__(self, parent, map_widget):
@@ -17,7 +17,6 @@ class RightPanel(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
 
-        # Unico grafico giallo
         self.graph_frame = Graph.Graph(self)
         layout.addWidget(self.graph_frame, 1)
         self.graph_frame.plot_example()
