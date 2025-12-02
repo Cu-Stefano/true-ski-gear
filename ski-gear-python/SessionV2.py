@@ -665,6 +665,7 @@ class SessionV2(BaseSession):
         vlines = []
         
         bottom_axis = TimeAxis(orientation='bottom', formatter=default_time_formatter)
+        self._acc_plots = set()
         for row, title in enumerate(pane_titles):
             vb = NoRightZoomViewBox()
             vb.setDefaultPadding(0.0)
@@ -679,21 +680,24 @@ class SessionV2(BaseSession):
             except Exception:
                 pass
 
-            p.setLabel('left', title, color='w')
+            p.setLabel('left', "" if title.startswith("Acc") else title, color='w')
             p.getAxis('left').setTextPen('w')
             p.getAxis('left').setPen('w')
             try:
-                p.getAxis('left').setWidth(40)
+                p.getAxis('left').setWidth(50)
             except Exception:
                 pass
+            if title.startswith("Acc"):
+                p.getAxis('left').setTicks([[(0.0, "0")]])
+                self._acc_plots.add(p)
 
             if title != pane_titles[-1]:
-                p.setLimits(xMin=0.0, minXRange=500.0, maxXRange=300000.0)
+                p.setLimits(xMin=0.0, minXRange=300.0, maxXRange=300000.0)
                 p.getAxis('bottom').setStyle(showValues=False)
                 p.getAxis('bottom').setHeight(0)
                 # p.getAxis('bottom').setPen(None)
             else:
-                p.setLimits(xMin=0.0, minXRange=500.0, maxXRange=300000.0)
+                p.setLimits(xMin=0.0, minXRange=300.0, maxXRange=300000.0)
                 p.getAxis('bottom').setTextPen('w')
                 p.getAxis('bottom').setPen('w')
 
@@ -813,4 +817,39 @@ class SessionV2(BaseSession):
         except Exception:
             pass
 
-    
+        self._plots = plots
+
+    def apply_y_ticks(self):
+        try:
+            plots = getattr(self, "_plots", [])
+            acc_plots = getattr(self, "_acc_plots", set())
+            for p in plots:
+                if p in acc_plots:
+                    p.getAxis('left').setTicks([[(0.0, "0")]])
+                    continue
+                ys_max = 0.0
+                for it in p.listDataItems():
+                    xd, yd = it.getData()
+                    if yd is None:
+                        continue
+                    try:
+                        m = float(np.nanmax(np.abs(yd)))
+                        if m > ys_max:
+                            ys_max = m
+                    except Exception:
+                        pass
+                if ys_max <= 0:
+                    continue
+                steps = [-0.90, 0.0, 0.90]
+                vals = [s * ys_max for s in steps]
+                def fmt(v):
+                    av = abs(ys_max)
+                    if av >= 10:
+                        return f"{int(round(v))}"
+                    return f"{v:.2f}"
+                ticks = [[(v, fmt(v)) for v in vals]]
+                p.getAxis('left').setTicks(ticks)
+        except Exception:
+            pass
+
+

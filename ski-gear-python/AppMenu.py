@@ -62,6 +62,11 @@ class AppMenu:
             if xs_sp is not None and getattr(xs_sp, "size", len(xs_sp)) > 0:
                 self.series[sV2.speed_index][0].setData(xs_sp, ys_sp, connect='finite')
             
+            try:
+                sV2.apply_y_ticks()
+            except Exception:
+                pass
+            
 
     def create_menu(self):
         export_action = Utilities.createAction("&Export1", self.Actions_button_clicked, self.main_window, "export stuff", False)
