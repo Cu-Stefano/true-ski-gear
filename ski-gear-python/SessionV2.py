@@ -8,9 +8,8 @@ from dataclasses import dataclass
 from BaseSession import BaseSession
 import numpy as np
 from session_header import SessionHeader
-from sensors_data_1khz import SensorsData1KHZStruct
-from sensors_data_100hz import SensorsData100HZStruct
-from data_header import DataHeader
+from sensors_data_1khzStruct import SensorsData1KHZStruct
+from sensors_data_100hzStruct import SensorsData100HZStruct
 import pyqtgraph as pg
 from Graph import NoRightZoomViewBox
 
@@ -191,12 +190,11 @@ class SessionV2(BaseSession):
 
                 try:
                     match msg_type:
-                        case self.MSG_SESS:  # 4
-                            # Do NOT pre-read raw; let parser read from stream
-                            self.header = SessionHeader.from_file(f)
+                        case self.MSG_SESS:  # 4 header
+                            self.header = SessionHeader.parse(f)
 
-                        case self.MSG_1KHZ:  # 13
-                            one = SensorsData1KHZStruct.from_file(f)
+                        case self.MSG_1KHZ:  # 13 fast sensor
+                            one = SensorsData1KHZStruct.parse(f)
 
                             acc_scale = (self.header.acc_full_scale / 32768.0) if self.header else 1.0
                             if self.header:
@@ -210,7 +208,7 @@ class SessionV2(BaseSession):
                             ts = self._ts_from_usec(one.t.msec * 100.0)
                             activation = getattr(one.data, "activation", 0)
 
-                            self.cur_fast.execute(
+                            resultFast = self.cur_fast.execute(
                                 self.fast_insert_sql,
                                 (
                                     data_index,
@@ -221,8 +219,8 @@ class SessionV2(BaseSession):
                                 ),
                             )
 
-                        case self.MSG_100HZ:  # 14
-                            hundred = SensorsData100HZStruct.from_file(f)
+                        case self.MSG_100HZ:  # 14 slow sensor
+                            hundred = SensorsData100HZStruct.parse(f)
 
                             acc_scale = (self.header.acc_full_scale / 32768.0) if self.header else 1.0
                             mag_scale = (self.header.mag_full_scale / 32768.0) if (self.header and self.header.mag_full_scale) else 1.0
@@ -255,7 +253,7 @@ class SessionV2(BaseSession):
 
                             activation = getattr(hundred.data, "activation", 0)
 
-                            self.cur_slow.execute(
+                            resultSlow = self.cur_slow.execute(
                                 self.slow_insert_sql,
                                 (
                                     data_index,
@@ -286,7 +284,7 @@ class SessionV2(BaseSession):
                             f.read(1)  # consume unsupported type and continue
 
                 except Exception as e:
-                    print(f"Parse error at index {data_index}: {e}")
+                    raise RuntimeError(f"Parse error at index {data_index}: {e}")
                     break
 
                 now = time.time()

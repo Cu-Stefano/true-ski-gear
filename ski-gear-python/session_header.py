@@ -1,15 +1,6 @@
-from dataclasses import dataclass
 import struct
-from typing import BinaryIO
-try:
-    from .data_header import DataHeader
-    from .binary_utils import read_exact
-except ImportError:
-    from data_header import DataHeader
-    from binary_utils import read_exact
-
-_AFTER_HEADER_STRUCT = struct.Struct("<III3B4HB5HI")
-TOTAL_SIZE = DataHeader.__annotations__ and 2 + _AFTER_HEADER_STRUCT.size  # 2 + 38 = 40
+from data_header import DataHeader
+from dataclasses import dataclass
 
 @dataclass
 class SessionHeader:
@@ -32,41 +23,23 @@ class SessionHeader:
     gps_rate: int
     activations: int
 
+    FORMAT = (
+        "<"     # little endian
+        "BB"    # DataHeader
+        "III"   # id, board_id, fw_version
+        "BBB"   # day, month, year
+        "HHHH"  # acc*, ext_acc*
+        "B"     # ext_status
+        "HHHH"  # gyro*, mag*
+        "H"     # gps_rate
+        "I"     # activations
+    )
+
+    SIZE = struct.calcsize(FORMAT)
+
     @classmethod
-    def from_file(cls, f: BinaryIO) -> "SessionHeader":
-        # Read DataHeader
-        dh_raw = read_exact(f, 2)
-        header = DataHeader.parse(dh_raw)
-        if header.type != 4:
-            raise ValueError(f"Unexpected SessionHeader type {header.type} != 4")
-        # header.size should be size of (TimeStamp + payload) for other structs, but
-        # for SessionHeader we expect fixed total size (40). Accept either 40 or 38 (without DataHeader).
-        if header.size not in (38, 40):
-            # Accept legacy writer mistakes only if you decide so; here we enforce.
-            raise ValueError(f"Unexpected SessionHeader size field {header.size}")
-        rest = read_exact(f, _AFTER_HEADER_STRUCT.size)
-        (id_,
-         board_id,
-         fw_version,
-         day,
-         month,
-         year,
-         acc_full_scale,
-         acc_rate,
-         ext_acc_full_scale,
-         ext_acc_rate,
-         ext_status,
-         gyro_full_scale,
-         gyro_rate,
-         mag_full_scale,
-         mag_rate,
-         gps_rate,
-         activations) = _AFTER_HEADER_STRUCT.unpack(rest)
-        return cls(header, id_, board_id, fw_version,
-                   day, month, year,
-                   acc_full_scale, acc_rate,
-                   ext_acc_full_scale, ext_acc_rate,
-                   ext_status,
-                   gyro_full_scale, gyro_rate,
-                   mag_full_scale, mag_rate,
-                   gps_rate, activations)
+    def parse(cls, reader):
+        data = reader.read(cls.SIZE)
+        values = struct.unpack(cls.FORMAT, data)
+        header = DataHeader(values[0], values[1])
+        return cls(header, *values[2:])

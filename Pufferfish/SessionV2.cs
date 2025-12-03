@@ -450,7 +450,7 @@ internal class SessionV2 : BaseSession
 						fastSensorDataCmd.Parameters.AddWithValue("@gyro_z", (double)sensorsData1KHZStruct.data.gyro[2] * gyroScale);
 						fastSensorDataCmd.Parameters.AddWithValue("@activation", sensorsData1KHZStruct.data.activation);
 						fastSensorDataCmd.Parameters.AddWithValue("@time", GenerateSessionTimestampFromUSec((double)sensorsData1KHZStruct.t.msec * 100.0));
-						fastSensorDataCmd.ExecuteNonQuery();
+						var res = fastSensorDataCmd.ExecuteNonQuery();
 					}
 					catch (Exception message2)
 					{

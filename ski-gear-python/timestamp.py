@@ -1,15 +1,15 @@
 from dataclasses import dataclass
 import struct
 
-_TIMESTAMP_STRUCT = struct.Struct("<I")
-
 @dataclass
 class TimeStamp:
     msec: int
 
+    FORMAT = "<I"     # uint32
+    SIZE = struct.calcsize(FORMAT)
+
     @classmethod
-    def parse(cls, b: bytes, offset=0):
-        if len(b) < offset + _TIMESTAMP_STRUCT.size:
-            raise ValueError("Not enough bytes for TimeStamp")
-        (msec,) = _TIMESTAMP_STRUCT.unpack_from(b, offset)
+    def parse(cls, reader):
+        data = reader.read(cls.SIZE)
+        (msec,) = struct.unpack(cls.FORMAT, data)
         return cls(msec)

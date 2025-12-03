@@ -1,16 +1,16 @@
-from dataclasses import dataclass
 import struct
-
-_DATA_HEADER_STRUCT = struct.Struct("<BB")
+from dataclasses import dataclass
 
 @dataclass
 class DataHeader:
     type: int
     size: int
 
+    FORMAT = "<BB"      # 1 byte + 1 byte = 2 bytes
+    SIZE = struct.calcsize(FORMAT)
+    
     @classmethod
-    def parse(cls, b: bytes):
-        if len(b) < _DATA_HEADER_STRUCT.size:
-            raise ValueError("Not enough bytes for DataHeader")
-        t, s = _DATA_HEADER_STRUCT.unpack_from(b, 0)
-        return cls(t, s)
+    def parse(cls, reader):
+        data = reader.read(cls.SIZE)
+        type_, size = struct.unpack(cls.FORMAT, data)
+        return cls(type_, size)
