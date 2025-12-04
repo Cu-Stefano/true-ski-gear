@@ -43,28 +43,11 @@ class AppMenu:
                     if xs is not None and getattr(xs, "size", len(xs)) > 0:
                         self.series[bucket_idx][ax].setData(xs, ys, connect='finite')
 
-            # Main (fast acc x/y/z) -> bucket 0
-            _set_xyz(0, lambda ax: sV2.get_fast_acc_series(min_idx, max_idx, ax))
-
-            # Gyro (x/y/z) -> bucket sV2.gyro_index (1)
+            _set_xyz(sV2.mainAcc_index, lambda ax: sV2.get_fast_acc_series(min_idx, max_idx, ax))
             _set_xyz(sV2.gyro_index, lambda ax: sV2.get_gyro_series(min_idx, max_idx, ax))
-
-            # Pose (rot x/y/z) -> bucket 3
-            _set_xyz(3, lambda ax: sV2.get_pose_series(min_idx, max_idx, ax))
-
-            # Gravity (x/y/z) -> bucket 4
-            _set_xyz(4, lambda ax: sV2.get_gravity_series(min_idx, max_idx, axis=ax))
-
-            # Speed (1 curva) -> bucket sV2.speed_index (2)
-            xs_sp, ys_sp = sV2.get_speed_series(min_idx, max_idx)
-            if xs_sp is not None and getattr(xs_sp, "size", len(xs_sp)) > 0 and len(self.series) > sV2.speed_index:
-                if isinstance(self.series[sV2.speed_index], list) and len(self.series[sV2.speed_index]) > 0:
-                    self.series[sV2.speed_index][0].setData(xs_sp, ys_sp, connect='finite')
-            
-            try:
-                sV2.apply_y_ticks()
-            except Exception:
-                pass
+            _set_xyz(sV2.pose_index, lambda ax: sV2.get_pose_series(min_idx, max_idx, ax))
+            _set_xyz(sV2.gravity_index, lambda ax: sV2.get_gravity_series(min_idx, max_idx, axis=ax))
+            _set_xyz(sV2.speed_index, lambda ax: (sV2.get_speed_series(min_idx, max_idx) if ax == 0 else (None, None)))
             
 
     def create_menu(self):

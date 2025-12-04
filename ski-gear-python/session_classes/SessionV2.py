@@ -23,6 +23,9 @@ class SessionV2(BaseSession):
 
     gyro_index = 1
     speed_index = 2
+    mainAcc_index = 0
+    gravity_index = 4
+    pose_index = 3
     
     def __init__(self, device_id: int, session_id: int, filename: str, right_panel=None):
         super().__init__(nofgraphs=5, nofsensors=5)
@@ -32,6 +35,8 @@ class SessionV2(BaseSession):
         self.session_id = session_id
         self.session_file_name = filename
         self.header: SessionHeader | None = None
+        
+        self.right_panel.resetPathCoords()
 
         dbfile = self._prepare_db(filename)
         self.conn = sqlite3.connect(dbfile)
@@ -56,12 +61,10 @@ class SessionV2(BaseSession):
             "VALUES (?,?,?,?,?)"
         )
 
-        # Cursors for bulk insertion
         self.cur_fast = self.conn.cursor()
         self.cur_slow = self.conn.cursor()
         self.cur_gps = self.conn.cursor()
         
-        # Track data-index range for plotting
         self.MinIndex = 0
         self.MaxIndex = 0
 
@@ -141,7 +144,6 @@ class SessionV2(BaseSession):
         ms = int(usec / 1000.0)
         return self._base_date() + timedelta(milliseconds=ms)
 
-    # ---------------- Core reading method ----------------------------------------------------
     def ReadSessionFromFileV2(self, file_name: str, prog=None):
         if not os.path.exists(file_name):
             print(f"Warning: file {file_name} does not exist.")
@@ -272,7 +274,7 @@ class SessionV2(BaseSession):
                                 pass
 
                         case _:
-                            f.read(1)  # consume unsupported type and continue
+                            f.read(1) 
 
                 except Exception as e:
                     raise RuntimeError(f"Parse error at index {data_index}: {e}")
@@ -290,6 +292,7 @@ class SessionV2(BaseSession):
 
                 data_index += 1
 
+            self.right_panel.update_timeline_range()
             self.conn.commit()
             self.MaxIndex = data_index
         except Exception as ex:
@@ -467,7 +470,6 @@ class SessionV2(BaseSession):
         if max_index is None:
             max_index = int(self.MaxIndex)
 
-        # Choose the column based on axis
         col = "grav_x" if axis == 0 else ("grav_y" if axis == 1 else "grav_z")
         sql = (
             f"SELECT dataIndex, {col} "
@@ -512,8 +514,7 @@ class SessionV2(BaseSession):
         x = np.array([r[0] for r in rows], dtype=float)
         y = np.array([r[1] for r in rows], dtype=float)
         return x, y
-
-    # --------- NUOVI HELPER PER LETTURA SERIE DAL DB ---------
+    
     def _get_series_from_db(self, sql: str, params: tuple):
         rows = []
         try:
@@ -544,12 +545,7 @@ class SessionV2(BaseSession):
         sql = f"SELECT dataIndex, {col} FROM fastSensors WHERE dataIndex BETWEEN ? AND ? ORDER BY dataIndex"
         return self._get_series_from_db(sql, (min_index, max_index))
 
-    def get_slow_acc_series(self, sensor_idx: int, min_index: int | None = None, max_index: int | None = None, axis: int = 0):
-        # Accelerometri lenti (Acc 1..4) rimossi: non disponibile
-        return np.array([]), np.array([])
-
     def get_pose_series(self, min_index: int | None = None, max_index: int | None = None, axis: int = 0):
-        # Pose = rot_x/y/z da slowSensors
         if self.conn is None:
             return np.array([]), np.array([])
         if min_index is None: min_index = int(self.MinIndex)
@@ -557,6 +553,32 @@ class SessionV2(BaseSession):
         col = "rot_x" if axis == 0 else ("rot_y" if axis == 1 else "rot_z")
         sql = f"SELECT dataIndex, {col} FROM slowSensors WHERE dataIndex BETWEEN ? AND ? ORDER BY dataIndex"
         return self._get_series_from_db(sql, (min_index, max_index))
+    
+    def get_slow_timestamp_range(self):
+     """
+     Restituisce il valore minimo e massimo di `Timestamp` presenti in `slowSensors`.
+     Ritorna:
+     - (min_ts, max_ts) come oggetti `datetime` se disponibili
+     - (None, None) se la tabella è vuota o i timestamp mancano
+     """
+     if self.conn is None:
+         return None, None
+     try:
+         cur = self.conn.cursor()
+         cur.execute(
+             "SELECT MIN(Timestamp), MAX(Timestamp) FROM slowSensors WHERE Timestamp IS NOT NULL"
+         )
+         row = cur.fetchone()
+         cur.close()
+         if not row or (row[0] is None and row[1] is None):
+             return None, None
+         min_str, max_str = row
+         min_ts = datetime.fromisoformat(min_str) if min_str else None
+         max_ts = datetime.fromisoformat(max_str) if max_str else None
+         return min_ts, max_ts
+     except Exception as e:
+         print(f"get_slow_timestamp_range error: {e}")
+         return None, None
 
     def InitSessionPlotModel(self, series, axis: int = 2):
         """
@@ -566,21 +588,27 @@ class SessionV2(BaseSession):
         """
         LINE_WIDTH = 1.0
         CURSOR_WIDTH = 1.0
-        # Parametri
         nofsensors = 5
         nofgraphs = 5
         gyro_index = self.gyro_index            # 1
         speed_index = self.speed_index          # 2
 
-        # Helper: formatter tempo (ms) -> (mm:ss.mmm) 
-        def default_time_formatter(v: float) -> str:
+        min_ts, max_ts = self.get_slow_timestamp_range()
+
+        def time_formatter_from_db(v: float) -> str:
             try:
-                seconds = float(v) / 1000.0
-                m = int(seconds // 60)
-                s = seconds % 60.0
-                return f"{m:02d}:{s:06.3f}"
+                if min_ts is not None and max_ts is not None and self.MaxIndex > self.MinIndex:
+                    # Interpolazione lineare tra dataIndex e timestamp
+                    frac = (v - self.MinIndex) / (self.MaxIndex - self.MinIndex)
+                    ts = min_ts + (max_ts - min_ts) * frac
+                    h = ts.hour
+                    m = ts.minute
+                    s = ts.second
+                    return f"{h:02d}:{m:02d}:{s:02d}"
+                else:
+                    return str(v)
             except Exception:
-                return f"{v:.0f}"
+                return str(v)
 
         class TimeAxis(pg.AxisItem):
             def __init__(self, *args, **kwargs):
@@ -633,7 +661,7 @@ class SessionV2(BaseSession):
         plots = []
         vlines = []
         
-        bottom_axis = TimeAxis(orientation='bottom', formatter=default_time_formatter)
+        bottom_axis = TimeAxis(orientation='bottom', formatter=time_formatter_from_db)
         self._acc_plots = set()
         for row, title in enumerate(pane_titles):
             vb = NoRightZoomViewBox()
@@ -661,7 +689,6 @@ class SessionV2(BaseSession):
                 p.setLimits(xMin=0.0, minXRange=300.0, maxXRange=300000.0)
                 p.getAxis('bottom').setStyle(showValues=False)
                 p.getAxis('bottom').setHeight(0)
-                # p.getAxis('bottom').setPen(None)
             else:
                 p.setLimits(xMin=0.0, minXRange=300.0, maxXRange=300000.0)
                 p.getAxis('bottom').setTextPen('w')
@@ -697,34 +724,34 @@ class SessionV2(BaseSession):
         self._line_annotations = []
         vlines = []
 
-
-        def _sync_lines(moved_line):
-            try:
-                x = moved_line.value()
-                for ln in vlines:
-                    if ln is moved_line:
-                        continue
-                    ln.blockSignals(True)
-                    ln.setValue(x)
-                    ln.blockSignals(False)
-            except Exception:
-                pass
-
         white_pen = pg.mkPen('w', width=CURSOR_WIDTH)
         for p in plots:
-            ln = pg.InfiniteLine(angle=90, movable=True, pen=white_pen)
-            ln.sigPositionChanged.connect(lambda _, l=ln: _sync_lines(l))
+            ln = pg.InfiniteLine(angle=90, movable=False, pen=white_pen)
             p.addItem(ln)
             vlines.append(ln)
             self._line_annotations.append(ln)
 
-        try:
-            mid = (self.MinIndex + self.MaxIndex) / 2.0
-            for ln in vlines:
-                ln.setValue(mid)
-        except Exception:
-            pass
-        
+        def update_cursor_lines(val):
+            try:
+                n_coords = len(self.right_panel.path_coords) if self.right_panel and hasattr(self.right_panel, "path_coords") else 1
+                if n_coords > 1 and self.MaxIndex > self.MinIndex:
+                    frac = val / (n_coords - 1)
+                    data_idx = int(self.MinIndex + frac * (self.MaxIndex - self.MinIndex))
+                else:
+                    data_idx = val
+                for ln in vlines:
+                    ln.setValue(data_idx)
+               
+                for p in plots:
+                    vb = p.getViewBox()
+                    x0, x1 = vb.viewRange()[0]
+                    width = x1 - x0
+                    vb.setXRange(data_idx - width/2, data_idx + width/2, padding=0)
+            except Exception:
+                pass
+   
+        self.right_panel.timeline.valueChanged.connect(update_cursor_lines)
+    
         def add_curves_to_plot(plot_item: pg.PlotItem, count: int, pens: list[pg.QtGui.QPen]):
             items = []
             for i in range(count):
@@ -740,7 +767,6 @@ class SessionV2(BaseSession):
             return items
 
         pens3 = [red_pen, green_pen, blue_pen]
-        # Main: 3 componenti
         main_bucket = bucket_order_visual_to_series["Main"]
         main_plot_idx = pane_titles.index("Main")
         series[main_bucket] = add_curves_to_plot(plots[main_plot_idx], 3, pens3)
@@ -761,13 +787,6 @@ class SessionV2(BaseSession):
         grav_plot_idx = pane_titles.index("Gravity")
         series[grav_bucket] = add_curves_to_plot(plots[grav_plot_idx], 3, pens3)
 
-        try:
-            mid = (self.MinIndex + self.MaxIndex) / 2.0
-            for sl in vlines[1:]:
-                sl.setValue(mid)
-        except Exception:
-            pass
-
         def _apply_lod():
             try:
                 vb = bottom_plot.getViewBox()
@@ -781,8 +800,7 @@ class SessionV2(BaseSession):
             bottom_plot.getViewBox().sigXRangeChanged.connect(lambda *_: _apply_lod())
         except Exception:
             pass
-        
-        
+
 
         self._plots = plots
 

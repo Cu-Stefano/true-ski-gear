@@ -3610,6 +3610,7 @@ public class MForm : Form
             this.gMapControl.Size = new System.Drawing.Size(226, 137);
             this.gMapControl.TabIndex = 7;
             this.gMapControl.Zoom = 0D;
+            this.gMapControl.Load += new System.EventHandler(this.gMapControl_Load);
             this.gMapControl.Resize += new System.EventHandler(this.gMapControl_Resize);
             // 
             // buttonTerminateEditing
@@ -4119,4 +4120,9 @@ public class MForm : Form
             this.PerformLayout();
 
 	}
+
+    private void gMapControl_Load(object sender, EventArgs e)
+    {
+
+    }
 }

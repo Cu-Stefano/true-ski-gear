@@ -1,8 +1,9 @@
 from typing import Iterable, Sequence
-from PySide6.QtWidgets import QWidget, QVBoxLayout
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel
 from PySide6.QtCore import Qt, Signal
 import pyqtgraph as pg
 import numpy as np
+from datetime import datetime, timedelta
 
 class NoRightZoomViewBox(pg.ViewBox):
     clicked = Signal(float)
@@ -39,18 +40,35 @@ class Graph(QWidget):
 
         self.curve = self.plotw.plot([], [], pen=pg.mkPen('y', width=0.8), name='signal')
 
-        self.cursor = pg.InfiniteLine(angle=90, movable=True, pen=pg.mkPen('w', width=0.8))
-        self.plotw.addItem(self.cursor)
-
-        self.plotw.getViewBox().clicked.connect(self.update_cursor_pose)
-
         layout.addWidget(self.plotw)
 
-    def update_cursor_pose(self, x):
-        self.cursor.setValue(x)
+        # Pose bottom time label
+        self.pose_time_label = QLabel("--:--:--", self)
+        self.pose_time_label.setAlignment(Qt.AlignRight)
+        self.pose_time_label.setStyleSheet("color: white; padding: 2px 4px;")
+        layout.addWidget(self.pose_time_label)
+
+        self._start_time: datetime | None = None
+        self._min_index: int = 0
 
     def plot_example(self):
         self.curve.setData([], [])
         self.plotw.setTitle("", color='w')
-        self.cursor.setValue(0)
         self.plotw.enableAutoRange(axis=pg.ViewBox.XYAxes, enable=True)
+        self.pose_time_label.setText("--:--:--")
+
+    def _format_time(self, index: int) -> str:
+        try:
+            if self._start_time is None:
+                # Fallback: show index as seconds
+                seconds = max(0, int(index) - int(self._min_index))
+                h = seconds // 3600
+                m = (seconds % 3600) // 60
+                s = seconds % 60
+                return f"{h:02d}:{m:02d}:{s:02d}"
+            delta_ms = max(0, int(index) - int(self._min_index))
+            # Treat index as milliseconds offset from min_index
+            dt = self._start_time + timedelta(milliseconds=delta_ms)
+            return dt.strftime("%H:%M:%S")
+        except Exception:
+            return "--:--:--"
