@@ -1,7 +1,7 @@
 from dataclasses import dataclass
-from data_header import DataHeader
-from timestamp import TimeStamp
-from sensors_data_100hz import SensorsData100HZ
+from .data_header import DataHeader
+from .timestamp import TimeStamp
+from .sensors_data_100hz import SensorsData100HZ
 
 @dataclass
 class SensorsData100HZStruct:

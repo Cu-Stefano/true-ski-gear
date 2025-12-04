@@ -1,8 +1,8 @@
 import struct
 from dataclasses import dataclass
-from data_header import DataHeader
-from timestamp import TimeStamp
-from sensors_data_1khz import SensorsData1KHZ
+from .data_header import DataHeader
+from .timestamp import TimeStamp
+from .sensors_data_1khz import SensorsData1KHZ
 
 @dataclass
 class SensorsData1KHZStruct:

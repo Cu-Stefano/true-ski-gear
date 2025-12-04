@@ -1,16 +1,25 @@
 from PySide6.QtWidgets import (
     QWidget, QLabel, QPushButton, QHBoxLayout, QComboBox
 )
+from PySide6.QtCore import Signal
+import logging
 import Utilities
 
 class TopBar(QWidget):
+    # Signals for actions to avoid tight coupling
+    updatePortsRequested = Signal()
+    connectRequested = Signal(str)  # selected port
+    disconnectRequested = Signal()
     
     def on_update_ports(self):
-        print("Update ports")
+        logging.getLogger(__name__).info("Update ports requested")
+        self.updatePortsRequested.emit()
     def on_connect(self):
-        print("Connect")
+        logging.getLogger(__name__).info("Connect requested")
+        self.connectRequested.emit(self.port_select.currentText())
     def on_disconnect(self):
-        print("Disconnect")
+        logging.getLogger(__name__).info("Disconnect requested")
+        self.disconnectRequested.emit()
         
     def __init__(self, parent):
         super().__init__()

@@ -1,15 +1,14 @@
 import os
 import sqlite3
-import ctypes
-from typing import Type, BinaryIO
 import time
 from datetime import datetime, timedelta
 from dataclasses import dataclass
-from BaseSession import BaseSession
+from .BaseSession import BaseSession
 import numpy as np
-from session_header import SessionHeader
-from sensors_data_1khzStruct import SensorsData1KHZStruct
-from sensors_data_100hzStruct import SensorsData100HZStruct
+from data_classes.session_header import SessionHeader
+from data_classes.GPSData import GPSData
+from data_classes.sensors_data_1khzStruct import SensorsData1KHZStruct
+from data_classes.sensors_data_100hzStruct import SensorsData100HZStruct
 import pyqtgraph as pg
 from Graph import NoRightZoomViewBox
 
@@ -19,14 +18,14 @@ class SessionV2(BaseSession):
     MSG_1KHZ = 13
     MSG_100HZ = 14
 
-    MAX_GRAPHS = 9
+    MAX_GRAPHS = 5
     MAX_SENSORS = 5
 
-    gyro_index = 5
-    speed_index = 6
+    gyro_index = 1
+    speed_index = 2
     
     def __init__(self, device_id: int, session_id: int, filename: str, right_panel=None):
-        super().__init__(nofgraphs=9, nofsensors=5)
+        super().__init__(nofgraphs=5, nofsensors=5)
         self.session_version = 2 # ancora da capire perchè esiste una sessione v1 e v2
         self.right_panel = right_panel
         self.device_id = device_id
@@ -47,14 +46,10 @@ class SessionV2(BaseSession):
         )
         self.slow_insert_sql = (
             "INSERT INTO slowSensors "
-            "(dataIndex, acc_0_x, acc_0_y, acc_0_z, "
-            " acc_1_x, acc_1_y, acc_1_z, "
-            " acc_2_x, acc_2_y, acc_2_z, "
-            " acc_3_x, acc_3_y, acc_3_z, "
-            " mag_x, mag_y, mag_z, "
+            "(dataIndex, mag_x, mag_y, mag_z, "
             " rot_x, rot_y, rot_z, "
             " grav_x, grav_y, grav_z, activation, Timestamp) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)"
         )
         self.gps_insert_sql = (
             "INSERT INTO gpssensors (dataIndex, latitude, longitude, speed, Timestamp) "
@@ -86,18 +81,6 @@ class SessionV2(BaseSession):
             CREATE TABLE IF NOT EXISTS slowSensors (
                 Timestamp DATETIME DEFAULT null,
                 dataIndex INTEGER UNIQUE ON CONFLICT REPLACE,
-                acc_0_x,
-                acc_0_y,
-                acc_0_z,
-                acc_1_x,
-                acc_1_y,
-                acc_1_z,
-                acc_2_x,
-                acc_2_y,
-                acc_2_z,
-                acc_3_x,
-                acc_3_y,
-                acc_3_z,
                 mag_x,
                 mag_y,
                 mag_z,
@@ -222,15 +205,10 @@ class SessionV2(BaseSession):
                         case self.MSG_100HZ:  # 14 slow sensor
                             hundred = SensorsData100HZStruct.parse(f)
 
-                            acc_scale = (self.header.acc_full_scale / 32768.0) if self.header else 1.0
                             mag_scale = (self.header.mag_full_scale / 32768.0) if (self.header and self.header.mag_full_scale) else 1.0
                             ts = self._ts_from_usec(hundred.t.msec * 100.0)
 
-                            acc_vals = hundred.data.acc
-                            acc0 = [acc_vals[0] * acc_scale, acc_vals[1] * acc_scale, acc_vals[2] * acc_scale]
-                            acc1 = [acc_vals[3] * acc_scale, acc_vals[4] * acc_scale, acc_vals[5] * acc_scale]
-                            acc2 = [acc_vals[6] * acc_scale, acc_vals[7] * acc_scale, acc_vals[8] * acc_scale]
-                            acc3 = [acc_vals[9] * acc_scale, acc_vals[10] * acc_scale, acc_vals[11] * acc_scale]
+                            # Accelerometri 1..4 non utilizzati: ignorati
 
                             mag_x = mag_y = mag_z = None
                             if hundred.data.mag:
@@ -257,7 +235,6 @@ class SessionV2(BaseSession):
                                 self.slow_insert_sql,
                                 (
                                     data_index,
-                                    *acc0, *acc1, *acc2, *acc3,
                                     mag_x, mag_y, mag_z,
                                     rot_x, rot_y, rot_z,
                                     grav_x, grav_y, grav_z,
@@ -277,6 +254,20 @@ class SessionV2(BaseSession):
                                         ts.isoformat(sep=" "),
                                     ),
                                 )
+                                gps_data = GPSData(
+                                    index=data_index,
+                                    time=ts,
+                                    speed=hundred.data.speed
+                                )
+                                gps_data.coords.Lat = hundred.data.latitude
+                                gps_data.coords.Lng = hundred.data.longitude
+                                gps_data.speed = hundred.data.speed
+                                gps_data.time = ts
+                                self.gps_data.append(gps_data)
+ 
+                                if self.right_panel is not None and hasattr(self.right_panel, "add_path_coord"):
+                                    self.right_panel.add_path_coord(hundred.data.latitude, hundred.data.longitude)
+                                
                             else:
                                 pass
 
@@ -401,8 +392,7 @@ class SessionV2(BaseSession):
                     (min_index, max_index, sampling)
                 ))
                 slow_rows = list(self.conn.execute(
-                    "SELECT dataIndex, acc_0_x, acc_0_y, acc_0_z, acc_1_x, acc_1_y, acc_1_z, acc_2_x, acc_2_y, acc_2_z, "
-                    "acc_3_x, acc_3_y, acc_3_z, mag_x, mag_y, mag_z, rot_x, rot_y, rot_z, grav_x, grav_y, grav_z, activation, Timestamp "
+                    "SELECT dataIndex, mag_x, mag_y, mag_z, rot_x, rot_y, rot_z, grav_x, grav_y, grav_z, activation, Timestamp "
                     "FROM slowSensors WHERE dataIndex BETWEEN ? AND ? AND (rowid % ?) = 0 ORDER BY dataIndex",
                     (min_index, max_index, sampling // 10 if sampling // 10 > 0 else 1)
                 ))
@@ -420,8 +410,6 @@ class SessionV2(BaseSession):
                 ))
                 slow_rows = list(self.conn.execute(
                     "SELECT CAST(ROUND(dataIndex / ?) AS INTEGER) grp, "
-                    "AVG(acc_0_x), AVG(acc_0_y), AVG(acc_0_z), AVG(acc_1_x), AVG(acc_1_y), AVG(acc_1_z), "
-                    "AVG(acc_2_x), AVG(acc_2_y), AVG(acc_2_z), AVG(acc_3_x), AVG(acc_3_y), AVG(acc_3_z), "
                     "AVG(mag_x), AVG(mag_y), AVG(mag_z), AVG(rot_x), AVG(rot_y), AVG(rot_z), "
                     "AVG(grav_x), AVG(grav_y), AVG(grav_z), MAX(activation), MIN(Timestamp) "
                     "FROM slowSensors WHERE dataIndex BETWEEN ? AND ? GROUP BY grp ORDER BY grp",
@@ -440,8 +428,7 @@ class SessionV2(BaseSession):
                     (min_index, max_index)
                 ))
                 slow_rows = list(self.conn.execute(
-                    "SELECT dataIndex, acc_0_x, acc_0_y, acc_0_z, acc_1_x, acc_1_y, acc_1_z, acc_2_x, acc_2_y, acc_2_z, "
-                    "acc_3_x, acc_3_y, acc_3_z, mag_x, mag_y, mag_z, rot_x, rot_y, rot_z, grav_x, grav_y, grav_z, activation, Timestamp "
+                    "SELECT dataIndex, mag_x, mag_y, mag_z, rot_x, rot_y, rot_z, grav_x, grav_y, grav_z, activation, Timestamp "
                     "FROM slowSensors WHERE dataIndex BETWEEN ? AND ? ORDER BY dataIndex",
                     (min_index, max_index)
                 ))
@@ -558,16 +545,8 @@ class SessionV2(BaseSession):
         return self._get_series_from_db(sql, (min_index, max_index))
 
     def get_slow_acc_series(self, sensor_idx: int, min_index: int | None = None, max_index: int | None = None, axis: int = 0):
-        # sensor_idx: 0..3 corrispondono a Acc 1..4
-        if self.conn is None:
-            return np.array([]), np.array([])
-        sensor_idx = max(0, min(3, int(sensor_idx)))
-        if min_index is None: min_index = int(self.MinIndex)
-        if max_index is None: max_index = int(self.MaxIndex)
-        ax = "x" if axis == 0 else ("y" if axis == 1 else "z")
-        col = f"acc_{sensor_idx}_{ax}"
-        sql = f"SELECT dataIndex, {col} FROM slowSensors WHERE dataIndex BETWEEN ? AND ? ORDER BY dataIndex"
-        return self._get_series_from_db(sql, (min_index, max_index))
+        # Accelerometri lenti (Acc 1..4) rimossi: non disponibile
+        return np.array([]), np.array([])
 
     def get_pose_series(self, min_index: int | None = None, max_index: int | None = None, axis: int = 0):
         # Pose = rot_x/y/z da slowSensors
@@ -581,7 +560,7 @@ class SessionV2(BaseSession):
 
     def InitSessionPlotModel(self, series, axis: int = 2):
         """
-        Inizializza un layout pyqtgraph con 9 pannelli impilati (Pose, Gravity, Acc1..4, Main, Gyro, Speed),
+        Inizializza un layout pyqtgraph con 5 pannelli impilati (Pose, Gravity, Main, Gyro, Speed),
         assi X condivisi, serie e linee verticali per ciascun pannello.
         Aggiorna 'series' (list di liste) con i PlotDataItem corrispondenti.
         """
@@ -589,9 +568,9 @@ class SessionV2(BaseSession):
         CURSOR_WIDTH = 1.0
         # Parametri
         nofsensors = 5
-        nofgraphs = 9
-        gyro_index = self.gyro_index            # 5
-        speed_index = self.speed_index          # 6
+        nofgraphs = 5
+        gyro_index = self.gyro_index            # 1
+        speed_index = self.speed_index          # 2
 
         # Helper: formatter tempo (ms) -> (mm:ss.mmm) 
         def default_time_formatter(v: float) -> str:
@@ -640,10 +619,6 @@ class SessionV2(BaseSession):
             "Speed",
             "Gyro",
             "Main",
-            "Acc 1",
-            "Acc 2",
-            "Acc 3",
-            "Acc 4",
             "Gravity",
             "Pose"
         ]
@@ -652,12 +627,8 @@ class SessionV2(BaseSession):
             "Speed":       speed_index,
             "Gyro":        gyro_index,
             "Main":        0,
-            "Acc 1":       1,
-            "Acc 2":       2,
-            "Acc 3":       3,
-            "Acc 4":       4,
-            "Gravity":     8,
-            "Pose":        7,
+            "Pose":        3,
+            "Gravity":     4,
         }
         plots = []
         vlines = []
@@ -678,16 +649,13 @@ class SessionV2(BaseSession):
             except Exception:
                 pass
 
-            p.setLabel('left', "" if title.startswith("Acc") else title, color='w')
+            p.setLabel('left', title, color='w')
             p.getAxis('left').setTextPen('w')
             p.getAxis('left').setPen('w')
             try:
                 p.getAxis('left').setWidth(50)
             except Exception:
                 pass
-            if title.startswith("Acc"):
-                p.getAxis('left').setTicks([[(0.0, "0")]])
-                self._acc_plots.add(p)
 
             if title != pane_titles[-1]:
                 p.setLimits(xMin=0.0, minXRange=300.0, maxXRange=300000.0)
@@ -724,7 +692,7 @@ class SessionV2(BaseSession):
 
         red_pen = pg.mkPen('r', width=LINE_WIDTH)
         green_pen = pg.mkPen('g', width=LINE_WIDTH)
-        blue_pen = pg.mkPen('b', width=LINE_WIDTH)
+        blue_pen = pg.mkPen(color=(80, 140, 255), width=LINE_WIDTH)
         white_pen = pg.mkPen('w', width=CURSOR_WIDTH)
         self._line_annotations = []
         vlines = []
@@ -772,11 +740,10 @@ class SessionV2(BaseSession):
             return items
 
         pens3 = [red_pen, green_pen, blue_pen]
-        for name in ("Main", "Acc 1", "Acc 2", "Acc 3", "Acc 4"):
-            bucket = bucket_order_visual_to_series[name]
-            plot_idx = pane_titles.index(name)
-            curves = add_curves_to_plot(plots[plot_idx], 3, pens3)
-            series[bucket] = curves
+        # Main: 3 componenti
+        main_bucket = bucket_order_visual_to_series["Main"]
+        main_plot_idx = pane_titles.index("Main")
+        series[main_bucket] = add_curves_to_plot(plots[main_plot_idx], 3, pens3)
             
         gyro_bucket = bucket_order_visual_to_series["Gyro"]
         gyro_plot_idx = pane_titles.index("Gyro")
@@ -814,6 +781,8 @@ class SessionV2(BaseSession):
             bottom_plot.getViewBox().sigXRangeChanged.connect(lambda *_: _apply_lod())
         except Exception:
             pass
+        
+        
 
         self._plots = plots
 
@@ -838,7 +807,7 @@ class SessionV2(BaseSession):
                         pass
                 if ys_max <= 0:
                     continue
-                steps = [-0.90, 0.0, 0.90]
+                steps = [-1, 0.0, 1]
                 vals = [s * ys_max for s in steps]
                 def fmt(v):
                     av = abs(ys_max)

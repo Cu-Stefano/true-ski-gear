@@ -2,7 +2,7 @@ from PySide6.QtGui import QAction
 from PySide6.QtWidgets import QMainWindow, QMenuBar
 from PySide6.QtWidgets import QFileDialog
 import Utilities
-import SessionV2
+from session_classes.SessionV2 import SessionV2
 import pyqtgraph as pg
 
 class AppMenu:
@@ -12,7 +12,7 @@ class AppMenu:
         self.main_window = main_window
         self.menu = self.main_window.menuBar()
         self.create_menu()
-        self.series = [[0 for _ in range(3)] for _ in range(9)]
+        self.series = []
 
     def Actions_button_clicked(self):
         print("Actions button clicked")
@@ -29,7 +29,7 @@ class AppMenu:
             deviceID = 0
             sessionID = 0
 
-            sV2 = SessionV2.SessionV2(deviceID, sessionID, selected_file, self.right_panel)
+            sV2 = SessionV2(deviceID, sessionID, selected_file, self.right_panel)
             # Carica nel DB
             sV2.ReadSessionFromFileV2(selected_file)
             sV2.InitSessionPlotModel(self.series, axis=2)
@@ -43,24 +43,23 @@ class AppMenu:
                     if xs is not None and getattr(xs, "size", len(xs)) > 0:
                         self.series[bucket_idx][ax].setData(xs, ys, connect='finite')
 
+            # Main (fast acc x/y/z) -> bucket 0
             _set_xyz(0, lambda ax: sV2.get_fast_acc_series(min_idx, max_idx, ax))
 
-            for b in range(1, 5):
-                idx_slow = b - 1 
-                _set_xyz(b, lambda ax, i=idx_slow: sV2.get_slow_acc_series(i, min_idx, max_idx, ax))
-
+            # Gyro (x/y/z) -> bucket sV2.gyro_index (1)
             _set_xyz(sV2.gyro_index, lambda ax: sV2.get_gyro_series(min_idx, max_idx, ax))
 
-            _set_xyz(7, lambda ax: sV2.get_pose_series(min_idx, max_idx, ax))
+            # Pose (rot x/y/z) -> bucket 3
+            _set_xyz(3, lambda ax: sV2.get_pose_series(min_idx, max_idx, ax))
 
-            for ax in (0, 1, 2):
-                xs_g, ys_g = sV2.get_gravity_series(min_idx, max_idx, axis=ax)
-                if xs_g is not None and getattr(xs_g, "size", len(xs_g)) > 0:
-                    self.series[8][ax].setData(xs_g, ys_g, connect='finite')
+            # Gravity (x/y/z) -> bucket 4
+            _set_xyz(4, lambda ax: sV2.get_gravity_series(min_idx, max_idx, axis=ax))
 
+            # Speed (1 curva) -> bucket sV2.speed_index (2)
             xs_sp, ys_sp = sV2.get_speed_series(min_idx, max_idx)
-            if xs_sp is not None and getattr(xs_sp, "size", len(xs_sp)) > 0:
-                self.series[sV2.speed_index][0].setData(xs_sp, ys_sp, connect='finite')
+            if xs_sp is not None and getattr(xs_sp, "size", len(xs_sp)) > 0 and len(self.series) > sV2.speed_index:
+                if isinstance(self.series[sV2.speed_index], list) and len(self.series[sV2.speed_index]) > 0:
+                    self.series[sV2.speed_index][0].setData(xs_sp, ys_sp, connect='finite')
             
             try:
                 sV2.apply_y_ticks()

@@ -10,7 +10,7 @@ class NoRightZoomViewBox(pg.ViewBox):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._x_padding = 0.0
-        self._y_padding = 0.3
+        self._y_padding = 0.25
 
     def suggestPadding(self, axis):
         try:
@@ -24,7 +24,6 @@ class NoRightZoomViewBox(pg.ViewBox):
         except Exception:
             pass
 
-    # commented mouse events intentionally omitted
 
 class Graph(QWidget):
     def __init__(self, parent=None):
@@ -43,11 +42,11 @@ class Graph(QWidget):
         self.cursor = pg.InfiniteLine(angle=90, movable=True, pen=pg.mkPen('w', width=0.8))
         self.plotw.addItem(self.cursor)
 
-        self.plotw.getViewBox().clicked.connect(self.update_cursor)
+        self.plotw.getViewBox().clicked.connect(self.update_cursor_pose)
 
         layout.addWidget(self.plotw)
 
-    def update_cursor(self, x):
+    def update_cursor_pose(self, x):
         self.cursor.setValue(x)
 
     def plot_example(self):

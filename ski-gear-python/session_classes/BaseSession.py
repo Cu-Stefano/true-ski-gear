@@ -3,10 +3,10 @@ import sqlite3
 from abc import ABC, abstractmethod
 from datetime import datetime, timedelta
 from typing import List, Iterable
-from GPSData import GPSData
-from GraphDataSource import DataPoint
+from data_classes.GPSData import GPSData
+from data_classes.GraphDataSource import DataPoint
 from dataclasses import dataclass
-import GraphDataSource
+import data_classes.GraphDataSource as GraphDataSource
 
 @dataclass
 class Tag:
@@ -150,4 +150,4 @@ class BaseSession(ABC):
         appdata = os.getenv("APPDATA")
         if appdata is None:
             raise EnvironmentError("APPDATA environment variable not set")
-        return os.path.join(appdata, "Pufferfish", "db")
+        return os.path.join(appdata, "BetterFish", "db")

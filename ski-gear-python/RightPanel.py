@@ -1,5 +1,6 @@
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QSlider
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
+import logging
 import Graph
 import Utilities
 
@@ -7,6 +8,9 @@ class RightPanel(QWidget):
     def __init__(self, parent, map_widget):
         super().__init__(parent)
         self.map = map_widget
+
+        # Signal to decouple map updates from timeline changes
+        self.timelineChanged = Signal(float, float)  # lat, lon
 
         base_lat = 46.4983
         base_lon = 11.3548
@@ -28,17 +32,25 @@ class RightPanel(QWidget):
         self.timeline.setTickPosition(QSlider.TickPosition.TicksBelow)
         self.timeline.setTickInterval(max(1, len(self.path_coords)//10))
         self.timeline.setPageStep(max(1, len(self.path_coords)//20))
-        self.timeline.valueChanged.connect(self.on_timeline_next)
+        self.timeline.valueChanged.connect(self.on_timeline_change)
         bottom_layout.addWidget(self.timeline)
 
-        self.timeline_next_btn = Utilities.createButton(">>", lambda: self.on_timeline_next(self.timeline.value()))
+        self.timeline_next_btn = Utilities.createButton(">>", lambda: self.on_timeline_change(self.timeline.value()))
         bottom_layout.addWidget(self.timeline_next_btn)
 
         layout.addLayout(bottom_layout)
         self.setLayout(layout)
 
-    def on_timeline_next(self, slider_value: int):
+    def on_timeline_change(self, slider_value: int):
         idx = int(slider_value)
         if 0 <= idx < len(self.path_coords):
             lat, lon = self.path_coords[idx]
-            self.map.MoveMarker(lat, lon)
+            # Emit signal so MainWindow can handle map updates
+            try:
+                self.timelineChanged.emit(lat, lon)
+            except Exception:
+                logging.getLogger(__name__).warning("Failed to emit timelineChanged")
+
+    def add_path_coord(self, lat: float, lon: float):
+        """Aggiunge una nuova coordinata (lat, lon) a path_coords."""
+        self.path_coords.append((lat, lon))

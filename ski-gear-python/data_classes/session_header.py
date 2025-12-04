@@ -1,5 +1,5 @@
 import struct
-from data_header import DataHeader
+from .data_header import DataHeader
 from dataclasses import dataclass
 
 @dataclass

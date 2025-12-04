@@ -39,7 +39,7 @@ class MainWindow(QMainWindow):
 
 if __name__ == "__main__":
 
-    pg.setConfigOptions(antialias=True)
+    pg.setConfigOptions(antialias=True, segmentedLineMode = "on")
 
     app = QApplication(sys.argv)
     w = MainWindow()
