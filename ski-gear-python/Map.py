@@ -9,7 +9,7 @@ class Map(QWidget):
         self.longitude = longitude
         layout = QVBoxLayout(self)
         self.web_view = QWebEngineView(self)
-        # Utilizza OpenStreetMap con layer satellitare (Esri World Imagery)
+
         html = f"""
         <!DOCTYPE html>
         <html>

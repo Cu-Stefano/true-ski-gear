@@ -644,19 +644,19 @@ class SessionV2(BaseSession):
         comp_colors = ['r', 'g', 'b']
         
         pane_titles = [
-            "Speed",
-            "Gyro",
-            "Main",
-            "Gravity",
-            "Pose"
+            "Speed [km/h]",
+            "Gyro [rad/s]",
+            "Main [g]",
+            "Gravity [g]",
+            "Pose [rad]"
         ]
 
         bucket_order_visual_to_series = {
-            "Speed":       speed_index,
-            "Gyro":        gyro_index,
-            "Main":        0,
-            "Pose":        3,
-            "Gravity":     4,
+            "Speed [km/h]": speed_index,
+            "Gyro [rad/s]": gyro_index,
+            "Main [g]": 0,
+            "Pose [rad]": 3,
+            "Gravity [g]": 4,
         }
         plots = []
         vlines = []
@@ -681,7 +681,7 @@ class SessionV2(BaseSession):
             p.getAxis('left').setTextPen('w')
             p.getAxis('left').setPen('w')
             try:
-                p.getAxis('left').setWidth(50)
+                p.getAxis('left').setWidth(60)
             except Exception:
                 pass
 
@@ -694,12 +694,17 @@ class SessionV2(BaseSession):
                 p.getAxis('bottom').setTextPen('w')
                 p.getAxis('bottom').setPen('w')
 
-            if title == "Speed":
+            if title == "Speed [m/s]":
                 p.showGrid(x=False, y=False, alpha=0.3)
             else:
                 p.showGrid(x=False, y=False, alpha=0.3)
 
             vb.setMouseEnabled(x=True, y=False)
+
+            # Aggiungi legenda
+            legend = p.addLegend(offset=(-10, 5))
+            legend.setBrush(pg.mkBrush(100, 100, 100, 150))
+            legend.setLabelTextColor('w')
 
             glw.addItem(p)
             if row < len(pane_titles) - 1:
@@ -750,12 +755,19 @@ class SessionV2(BaseSession):
             except Exception:
                 pass
    
+
         self.right_panel.timeline.valueChanged.connect(update_cursor_lines)
     
         def add_curves_to_plot(plot_item: pg.PlotItem, count: int, pens: list[pg.QtGui.QPen]):
             items = []
+            names = ['X', 'Y', 'Z']
+            show_legend = getattr(self, "_legend_shown", False)
+            if not show_legend:
+                plot_item.addLegend(offset=(-10, 5))
+                self._legend_shown = True
             for i in range(count):
-                it = pg.PlotDataItem(pen=pens[i])
+                name = names[i] if count > 1 else None
+                it = pg.PlotDataItem(pen=pens[i], name=name if show_legend is False else None)
                 try:
                     it.setClipToView(True)
                     it.setDownsampling(1, True, mode='subsample')
@@ -767,24 +779,24 @@ class SessionV2(BaseSession):
             return items
 
         pens3 = [red_pen, green_pen, blue_pen]
-        main_bucket = bucket_order_visual_to_series["Main"]
-        main_plot_idx = pane_titles.index("Main")
+        main_bucket = bucket_order_visual_to_series["Main [g]"]
+        main_plot_idx = pane_titles.index("Main [g]")
         series[main_bucket] = add_curves_to_plot(plots[main_plot_idx], 3, pens3)
             
-        gyro_bucket = bucket_order_visual_to_series["Gyro"]
-        gyro_plot_idx = pane_titles.index("Gyro")
+        gyro_bucket = bucket_order_visual_to_series["Gyro [rad/s]"]
+        gyro_plot_idx = pane_titles.index("Gyro [rad/s]")
         series[gyro_bucket] = add_curves_to_plot(plots[gyro_plot_idx], 3, pens3)
 
-        speed_bucket = bucket_order_visual_to_series["Speed"]
-        speed_plot_idx = pane_titles.index("Speed")
+        speed_bucket = bucket_order_visual_to_series["Speed [km/h]"]
+        speed_plot_idx = pane_titles.index("Speed [km/h]")
         series[speed_bucket] = add_curves_to_plot(plots[speed_plot_idx], 1, [red_pen])
 
-        pose_bucket = bucket_order_visual_to_series["Pose"]
-        pose_plot_idx = pane_titles.index("Pose")
+        pose_bucket = bucket_order_visual_to_series["Pose [rad]"]
+        pose_plot_idx = pane_titles.index("Pose [rad]")
         series[pose_bucket] = add_curves_to_plot(plots[pose_plot_idx], 3, pens3)
 
-        grav_bucket = bucket_order_visual_to_series["Gravity"]
-        grav_plot_idx = pane_titles.index("Gravity")
+        grav_bucket = bucket_order_visual_to_series["Gravity [g]"]
+        grav_plot_idx = pane_titles.index("Gravity [g]")
         series[grav_bucket] = add_curves_to_plot(plots[grav_plot_idx], 3, pens3)
 
         def _apply_lod():

@@ -15,7 +15,11 @@
     <ApplicationIcon>app.ico</ApplicationIcon>
     <RootNamespace />
   </PropertyGroup>
-  <ItemGroup />
+  <ItemGroup>
+    <Compile Remove="ski-gear-python\**" />
+    <EmbeddedResource Remove="ski-gear-python\**" />
+    <None Remove="ski-gear-python\**" />
+  </ItemGroup>
   <ItemGroup>
     <Reference Include="System.Data.SQLite">
       <HintPath>..\..\..\Downloads\swisstransfer_f0311e7c-0d30-41a4-8044-8ad37aa96fdb\Pufferfish.1.10.18.0\System.Data.SQLite.dll</HintPath>
