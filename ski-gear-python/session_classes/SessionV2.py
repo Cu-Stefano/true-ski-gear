@@ -10,7 +10,7 @@ from data_classes.GPSData import GPSData
 from data_classes.sensors_data_1khzStruct import SensorsData1KHZStruct
 from data_classes.sensors_data_100hzStruct import SensorsData100HZStruct
 import pyqtgraph as pg
-from Graph import NoRightZoomViewBox
+from Graph import NoRightZoomViewBox, Graph
 
 class SessionV2(BaseSession):
 
@@ -26,6 +26,12 @@ class SessionV2(BaseSession):
     mainAcc_index = 0
     gravity_index = 4
     pose_index = 3
+    # Titoli pannelli/etichette come costanti per evitare duplicazioni
+    TITLE_SPEED = "Speed\n[km/h]"
+    TITLE_GYRO = "Gyro\n[rad/s]"
+    TITLE_MAIN = "Main\n[g]"
+    TITLE_GRAVITY = "Gravity\n[g]"
+    TITLE_POSE = "Pose\n[rad]"
     
     def __init__(self, device_id: int, session_id: int, filename: str, right_panel=None):
         super().__init__(nofgraphs=5, nofsensors=5)
@@ -587,8 +593,7 @@ class SessionV2(BaseSession):
         Aggiorna 'series' (list di liste) con i PlotDataItem corrispondenti.
         """
         LINE_WIDTH = 1.0
-        CURSOR_WIDTH = 1.0
-        nofsensors = 5
+        CURSOR_WIDTH = 0.5
         nofgraphs = 5
         gyro_index = self.gyro_index            # 1
         speed_index = self.speed_index          # 2
@@ -597,126 +602,42 @@ class SessionV2(BaseSession):
 
         def time_formatter_from_db(v: float) -> str:
             try:
-                if min_ts is not None and max_ts is not None and self.MaxIndex > self.MinIndex:
-                    # Interpolazione lineare tra dataIndex e timestamp
-                    frac = (v - self.MinIndex) / (self.MaxIndex - self.MinIndex)
+                if (
+                    min_ts is not None and max_ts is not None and
+                    self.MaxIndex > self.MinIndex
+                ):
+                    frac = (float(v) - float(self.MinIndex)) / float(self.MaxIndex - self.MinIndex)
+                    if frac < 0.0:
+                        frac = 0.0
+                    if frac > 1.0:
+                        frac = 1.0
                     ts = min_ts + (max_ts - min_ts) * frac
-                    h = ts.hour
-                    m = ts.minute
-                    s = ts.second
-                    return f"{h:02d}:{m:02d}:{s:02d}"
-                else:
-                    return str(v)
+                    return ts.strftime("%H:%M:%S")
+                return str(v)
             except Exception:
                 return str(v)
-
-        class TimeAxis(pg.AxisItem):
-            def __init__(self, *args, **kwargs):
-                self._formatter = kwargs.pop("formatter", None)
-                super().__init__(*args, **kwargs)
-            def tickStrings(self, values, scale, spacing):
-                if self._formatter:
-                    return [self._formatter(v) for v in values]
-                return super().tickStrings(values, scale, spacing)
-
-        pg.setConfigOptions(antialias=True)
-        glw = pg.GraphicsLayoutWidget(show=False)
-        glw.ci.setContentsMargins(0, 0, 0, 0)
-        glw.ci.layout.setSpacing(0) 
-        try:
-            glw.ci.setBorder(None)
-        except Exception:
-            pass
-
-        if self.right_panel is not None:
-            try:
-                layout = self.right_panel.layout()
-                if hasattr(self.right_panel, "graph_frame") and self.right_panel.graph_frame is not None:
-                    old = self.right_panel.graph_frame
-                    layout.replaceWidget(old, glw)
-                    old.deleteLater()
-                else:
-                    layout.insertWidget(0, glw)
-                self.right_panel.graph_frame = glw
-            except Exception:
-                pass
-
-        comp_colors = ['r', 'g', 'b']
         
         pane_titles = [
-            "Speed [km/h]",
-            "Gyro [rad/s]",
-            "Main [g]",
-            "Gravity [g]",
-            "Pose [rad]"
+            self.TITLE_SPEED,
+            self.TITLE_GYRO,
+            self.TITLE_MAIN,
+            self.TITLE_GRAVITY,
+            self.TITLE_POSE
         ]
 
         bucket_order_visual_to_series = {
-            "Speed [km/h]": speed_index,
-            "Gyro [rad/s]": gyro_index,
-            "Main [g]": 0,
-            "Pose [rad]": 3,
-            "Gravity [g]": 4,
+            self.TITLE_SPEED: speed_index,
+            self.TITLE_GYRO: gyro_index,
+            self.TITLE_MAIN: 0,
+            self.TITLE_POSE: 3,
+            self.TITLE_GRAVITY: 4,
         }
-        plots = []
-        vlines = []
-        
-        bottom_axis = TimeAxis(orientation='bottom', formatter=time_formatter_from_db)
-        self._acc_plots = set()
-        for row, title in enumerate(pane_titles):
-            vb = NoRightZoomViewBox()
-            vb.setDefaultPadding(0.0)
-            if title == pane_titles[-1]:
-                p = pg.PlotItem(viewBox=vb, axisItems={'bottom': bottom_axis})
-            else:
-                p = pg.PlotItem(viewBox=vb)
 
-            try:
-                p.layout.setContentsMargins(0, 0, 0, 0)
-                p.setDefaultPadding(0.0)
-            except Exception:
-                pass
-
-            p.setLabel('left', title, color='w')
-            p.getAxis('left').setTextPen('w')
-            p.getAxis('left').setPen('w')
-            try:
-                p.getAxis('left').setWidth(60)
-            except Exception:
-                pass
-
-            if title != pane_titles[-1]:
-                p.setLimits(xMin=0.0, minXRange=300.0, maxXRange=300000.0)
-                p.getAxis('bottom').setStyle(showValues=False)
-                p.getAxis('bottom').setHeight(0)
-            else:
-                p.setLimits(xMin=0.0, minXRange=300.0, maxXRange=300000.0)
-                p.getAxis('bottom').setTextPen('w')
-                p.getAxis('bottom').setPen('w')
-
-            if title == "Speed [m/s]":
-                p.showGrid(x=False, y=False, alpha=0.3)
-            else:
-                p.showGrid(x=False, y=False, alpha=0.3)
-
-            vb.setMouseEnabled(x=True, y=False)
-
-            # Aggiungi legenda
-            legend = p.addLegend(offset=(-10, 5))
-            legend.setBrush(pg.mkBrush(100, 100, 100, 150))
-            legend.setLabelTextColor('w')
-
-            glw.addItem(p)
-            if row < len(pane_titles) - 1:
-                glw.nextRow()
-
-            plots.append(p)
-
-        bottom_plot = plots[-1]
-        bottom_plot.getViewBox().setDefaultPadding(0.0)
-        for p in plots[:-1]:
-            p.getViewBox().setDefaultPadding(0.0)
-            p.setXLink(bottom_plot)
+        glw, plots, bottom_plot, _ = Graph.build_multiplot_dashboard(
+            pane_titles=pane_titles,
+            bottom_formatter=time_formatter_from_db,
+            right_panel=self.right_panel
+        )
 
         if not series or len(series) != nofgraphs:
             series.clear()
@@ -727,14 +648,8 @@ class SessionV2(BaseSession):
         blue_pen = pg.mkPen(color=(80, 140, 255), width=LINE_WIDTH)
         white_pen = pg.mkPen('w', width=CURSOR_WIDTH)
         self._line_annotations = []
-        vlines = []
-
-        white_pen = pg.mkPen('w', width=CURSOR_WIDTH)
-        for p in plots:
-            ln = pg.InfiniteLine(angle=90, movable=False, pen=white_pen)
-            p.addItem(ln)
-            vlines.append(ln)
-            self._line_annotations.append(ln)
+        vlines = Graph.add_vertical_cursors(plots, white_pen)
+        self._line_annotations.extend(vlines)
 
         def update_cursor_lines(val):
             try:
@@ -754,66 +669,30 @@ class SessionV2(BaseSession):
                     vb.setXRange(data_idx - width/2, data_idx + width/2, padding=0)
             except Exception:
                 pass
-   
-
         self.right_panel.timeline.valueChanged.connect(update_cursor_lines)
     
-        def add_curves_to_plot(plot_item: pg.PlotItem, count: int, pens: list[pg.QtGui.QPen]):
-            items = []
-            names = ['X', 'Y', 'Z']
-            show_legend = getattr(self, "_legend_shown", False)
-            if not show_legend:
-                plot_item.addLegend(offset=(-10, 5))
-                self._legend_shown = True
-            for i in range(count):
-                name = names[i] if count > 1 else None
-                it = pg.PlotDataItem(pen=pens[i], name=name if show_legend is False else None)
-                try:
-                    it.setClipToView(True)
-                    it.setDownsampling(1, True, mode='subsample')
-                    it.setAutoDownsample(True)
-                except Exception:
-                    pass
-                plot_item.addItem(it)
-                items.append(it)
-            return items
-
         pens3 = [red_pen, green_pen, blue_pen]
-        main_bucket = bucket_order_visual_to_series["Main [g]"]
-        main_plot_idx = pane_titles.index("Main [g]")
-        series[main_bucket] = add_curves_to_plot(plots[main_plot_idx], 3, pens3)
+        main_bucket = bucket_order_visual_to_series[self.TITLE_MAIN]
+        main_plot_idx = pane_titles.index(self.TITLE_MAIN)
+        series[main_bucket] = Graph.add_curves(plots[main_plot_idx], 3, pens3, show_legend=True)
             
-        gyro_bucket = bucket_order_visual_to_series["Gyro [rad/s]"]
-        gyro_plot_idx = pane_titles.index("Gyro [rad/s]")
-        series[gyro_bucket] = add_curves_to_plot(plots[gyro_plot_idx], 3, pens3)
+        gyro_bucket = bucket_order_visual_to_series[self.TITLE_GYRO]
+        gyro_plot_idx = pane_titles.index(self.TITLE_GYRO)
+        series[gyro_bucket] = Graph.add_curves(plots[gyro_plot_idx], 3, pens3, show_legend=True)
 
-        speed_bucket = bucket_order_visual_to_series["Speed [km/h]"]
-        speed_plot_idx = pane_titles.index("Speed [km/h]")
-        series[speed_bucket] = add_curves_to_plot(plots[speed_plot_idx], 1, [red_pen])
+        speed_bucket = bucket_order_visual_to_series[self.TITLE_SPEED]
+        speed_plot_idx = pane_titles.index(self.TITLE_SPEED)
+        series[speed_bucket] = Graph.add_curves(plots[speed_plot_idx], 1, [red_pen], show_legend=True)
 
-        pose_bucket = bucket_order_visual_to_series["Pose [rad]"]
-        pose_plot_idx = pane_titles.index("Pose [rad]")
-        series[pose_bucket] = add_curves_to_plot(plots[pose_plot_idx], 3, pens3)
+        pose_bucket = bucket_order_visual_to_series[self.TITLE_POSE]
+        pose_plot_idx = pane_titles.index(self.TITLE_POSE)
+        series[pose_bucket] = Graph.add_curves(plots[pose_plot_idx], 3, pens3, show_legend=True)
 
-        grav_bucket = bucket_order_visual_to_series["Gravity [g]"]
-        grav_plot_idx = pane_titles.index("Gravity [g]")
-        series[grav_bucket] = add_curves_to_plot(plots[grav_plot_idx], 3, pens3)
+        grav_bucket = bucket_order_visual_to_series[self.TITLE_GRAVITY]
+        grav_plot_idx = pane_titles.index(self.TITLE_GRAVITY)
+        series[grav_bucket] = Graph.add_curves(plots[grav_plot_idx], 3, pens3, show_legend=True)
 
-        def _apply_lod():
-            try:
-                vb = bottom_plot.getViewBox()
-                x0, x1 = vb.viewRange()[0]
-                target_pts = 2000
-                step = max(1, int((x1 - x0) / max(1.0, target_pts)))
-            except Exception:
-                pass
-
-        try:
-            bottom_plot.getViewBox().sigXRangeChanged.connect(lambda *_: _apply_lod())
-        except Exception:
-            pass
-
-
+        Graph.connect_lod(bottom_plot, target_pts=2000)
         self._plots = plots
 
     def apply_y_ticks(self):
