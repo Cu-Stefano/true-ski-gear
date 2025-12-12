@@ -26,80 +26,6 @@ class NoRightZoomViewBox(pg.ViewBox):
             pass
 
 class Graph(QWidget):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-
-        pg.setConfigOptions(antialias=True)
-        self.plotw = pg.PlotWidget(viewBox=NoRightZoomViewBox(), background='k')
-        self.plotw.showGrid(x=True, y=True, alpha=0.3)
-
-        # Evita zoom verticale e l'auto-range finché non impostiamo noi i limiti
-        self.plotw.getViewBox().setMouseEnabled(x=True, y=False)
-        self.plotw.enableAutoRange(axis=pg.ViewBox.XYAxes, enable=False)
-
-        self.curve = self.plotw.plot([], [], pen=pg.mkPen('y', width=0.8), name='signal')
-        # Performance: render only what is visible and let pyqtgraph downsample
-        try:
-            self.curve.setClipToView(True)
-            self.curve.setAutoDownsample(True)
-            # Keep mode conservative to avoid averaging peaks; subsample selects points
-            self.curve.setDownsampling(1, True, mode='subsample')
-        except Exception:
-            pass
-
-        layout.addWidget(self.plotw)
-
-        # Pose bottom time label
-        self.pose_time_label = QLabel("--:--:--", self)
-        self.pose_time_label.setAlignment(Qt.AlignRight)
-        self.pose_time_label.setStyleSheet("color: white; padding: 2px 4px;")
-        layout.addWidget(self.pose_time_label)
-
-        self._start_time: datetime | None = None
-        self._min_index: int = 0
-        self._last_x_range: tuple[int, int] | None = None
-
-        # Unica linea cursore, riusata e aggiornata
-        self._cursor_line = pg.InfiniteLine(angle=90, movable=False, pen=pg.mkPen('#88ffffff'))
-        try:
-            self.plotw.addItem(self._cursor_line)
-        except Exception:
-            pass
-
-    def plot_example(self):
-        self.curve.setData([], [])
-        self.plotw.setTitle("", color='w')
-        # Abilita auto-range solo su dataset piccolo di esempio
-        self.plotw.enableAutoRange(axis=pg.ViewBox.XYAxes, enable=True)
-        self.pose_time_label.setText("--:--:--")
-
-    def _format_time(self, index: int) -> str:
-        try:
-            if self._start_time is None:
-                # Fallback: show index as seconds
-                seconds = max(0, int(index) - int(self._min_index))
-                h = seconds // 3600
-                m = (seconds % 3600) // 60
-                s = seconds % 60
-                return f"{h:02d}:{m:02d}:{s:02d}"
-            delta_ms = max(0, int(index) - int(self._min_index))
-            # Treat index as milliseconds offset from min_index
-            dt = self._start_time + timedelta(milliseconds=delta_ms)
-            return dt.strftime("%H:%M:%S")
-        except Exception:
-            return "--:--:--"
-
-    def update_cursor(self, x_pos: float | int):
-        try:
-            self._cursor_line.setPos(float(x_pos))
-        except Exception:
-            pass
-
-    # ==========================
-    # Metodi helper statici (UI)
-    # ==========================
     class TimeAxis(pg.AxisItem):
         def __init__(self, *args, formatter=None, **kwargs):
             super().__init__(*args, **kwargs)
@@ -163,10 +89,49 @@ class Graph(QWidget):
         return vlines
 
     @staticmethod
+    def add_time_regions(
+        plots: list[pg.PlotItem],
+        intervals: Sequence[tuple[float, float]],
+        color: tuple[int, int, int, int] = (255, 0, 0, 80)
+    ) -> list[list[pg.LinearRegionItem]]:
+        """
+        Aggiunge regioni verticali trasparenti (rettangoli rossi) per ciascun intervallo su ogni plot.
+        "intervals" è una lista di tuple (x0, x1) in coordinate di indice/tempo.
+        Ritorna una lista di liste con gli oggetti LinearRegionItem creati per ogni plot.
+        """
+        regions_per_plot: list[list[pg.LinearRegionItem]] = []
+        try:
+            brush = pg.mkBrush(color)
+            for p in plots:
+                plot_regions: list[pg.LinearRegionItem] = []
+                for (x0, x1) in intervals:
+                    try:
+                        reg = pg.LinearRegionItem(values=(float(x0), float(x1)), orientation=pg.LinearRegionItem.Vertical)
+                        reg.setMovable(False)
+                        # Stile trasparente rosso
+                        try:
+                            reg.setBrush(brush)
+                        except Exception:
+                            pass
+                        # Bordo leggero
+                        try:
+                            reg.setPen(pg.mkPen((255, 0, 0, 120)))
+                        except Exception:
+                            pass
+                        p.addItem(reg)
+                        plot_regions.append(reg)
+                    except Exception:
+                        pass
+                regions_per_plot.append(plot_regions)
+        except Exception:
+            pass
+        return regions_per_plot
+
+    @staticmethod
     def build_multiplot_dashboard(
         pane_titles: list[str],
-        bottom_formatter=None,
-        right_panel=None
+        bottom_formatter,
+        right_panel
     ):
         """Crea un GraphicsLayoutWidget con una riga per titolo, linka gli assi X
         e inserisce nel right_panel se presente. Ritorna (glw, plots, bottom_plot, bottom_axis).

@@ -1963,31 +1963,6 @@ public class MForm : Form
 		{
 			AddFallPointAnnotation(index, "Main", color);
 		}
-		if ((fall & 2) != 0)
-		{
-			AddFallPointAnnotation(index, "Hip R", color);
-		}
-		if ((fall & 4) != 0)
-		{
-			AddFallPointAnnotation(index, "Elbow R", color);
-		}
-		if ((fall & 8) != 0)
-		{
-			AddFallPointAnnotation(index, "Shoul R", color);
-		}
-		if ((fall & 0x10) != 0)
-		{
-			AddFallPointAnnotation(index, "Shoul L", color);
-		}
-		if ((fall & 0x20) != 0)
-		{
-			AddFallPointAnnotation(index, "Elbow L", color);
-		}
-		if ((fall & 0x40) != 0)
-		{
-			AddFallPointAnnotation(index, "Hip L", color);
-		}
-		if ((fall & 0x100) != 0)
 		{
 			AddFallPointAnnotation(index, "Gyro", color);
 		}
@@ -2005,7 +1980,7 @@ public class MForm : Form
 		}
 		if ((fall & 0x100000) != 0)
 		{
-			color = OxyColor.FromRgb(100, 100, 100).ToUint();
+			color = OxyColor.FromRgb(255, 255, 0).ToUint();
 			AddFallPointAnnotation(index, "Pose", color);
 		}
 	}

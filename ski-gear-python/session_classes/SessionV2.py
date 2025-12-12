@@ -1,15 +1,16 @@
 import os
 import sqlite3
 import time
-from datetime import datetime, timedelta
-from dataclasses import dataclass
-from .BaseSession import BaseSession
+from datetime import datetime, timedelta, timezone
+import Fall
 import numpy as np
+import pyqtgraph as pg
+
+from .BaseSession import BaseSession
 from data_classes.session_header import SessionHeader
 from data_classes.GPSData import GPSData
 from data_classes.sensors_data_1khzStruct import SensorsData1KHZStruct
 from data_classes.sensors_data_100hzStruct import SensorsData100HZStruct
-import pyqtgraph as pg
 from Graph import NoRightZoomViewBox, Graph
 
 class SessionV2(BaseSession):
@@ -26,7 +27,7 @@ class SessionV2(BaseSession):
     mainAcc_index = 0
     gravity_index = 4
     pose_index = 3
-    # Titoli pannelli/etichette come costanti per evitare duplicazioni
+
     TITLE_SPEED = "Speed\n[km/h]"
     TITLE_GYRO = "Gyro\n[rad/s]"
     TITLE_MAIN = "Main\n[g]"
@@ -168,6 +169,7 @@ class SessionV2(BaseSession):
 
         try:
             file_size = os.path.getsize(file_name)
+            
             while True:
                 pos = f.tell()
                 if pos >= file_size:
@@ -215,8 +217,6 @@ class SessionV2(BaseSession):
 
                             mag_scale = (self.header.mag_full_scale / 32768.0) if (self.header and self.header.mag_full_scale) else 1.0
                             ts = self._ts_from_usec(hundred.t.msec * 100.0)
-
-                            # Accelerometri 1..4 non utilizzati: ignorati
 
                             mag_x = mag_y = mag_z = None
                             if hundred.data.mag:
@@ -278,14 +278,12 @@ class SessionV2(BaseSession):
                                 
                             else:
                                 pass
-
                         case _:
                             f.read(1) 
-
                 except Exception as e:
                     raise RuntimeError(f"Parse error at index {data_index}: {e}")
                     break
-
+                
                 now = time.time()
                 if now - start_window_time > 1.0:
                     bps = int((f.tell() - prev_pos) / (now - start_window_time))
@@ -298,15 +296,239 @@ class SessionV2(BaseSession):
 
                 data_index += 1
 
+            try:
+                falls = []
+                # FastSensors
+                for row in self.conn.execute("SELECT dataIndex, activation FROM fastSensors WHERE activation != 0 ORDER BY dataIndex"):
+                    falls.append(Fall.Fall(int(row[0]), int(row[1])))
+                # SlowSensors
+                for row in self.conn.execute("SELECT dataIndex, activation FROM slowSensors WHERE activation != 0 ORDER BY dataIndex"):
+                    falls.append(Fall.Fall(int(row[0]), int(row[1])))
+                self.falls = falls
+            except Exception as e:
+                print(f"Error loading falls: {e}")
+                
             self.right_panel.update_timeline_range()
             self.conn.commit()
             self.MaxIndex = data_index
+            try:
+                if self.right_panel is not None:
+                    self.right_panel.set_index_bounds(int(self.MinIndex), int(self.MaxIndex))
+                    min_ts, max_ts = self.get_fast_timestamp_range()
+                    self.right_panel.set_time_bounds(self._base_date(), max_ts)
+            except Exception:
+                pass
         except Exception as ex:
             print(f"Reading aborted: {ex}")
             self.conn.rollback()
         finally:
             f.close()
 
+    def is_critical_fall(self, fall: int) -> bool:
+            is_new = self.isNewCriticalFallFormat()
+            header = fall & 0xFF000000
+            if not is_new:
+                return header == 0x80000000 or header == 0xF0000000
+            else:
+                return header == 0xFA000000
+
+    def update_critical_falls(self):
+        self.critical_falls = []
+        for f in self.falls:
+            if self.is_critical_fall(f.fall):
+                if f not in self.critical_falls:
+                    self.critical_falls.append(f)
+                    
+    def set_critical_falls(self):
+        """
+        Converte i punti di caduta in intervalli (start,end) in cui,
+        secondo la logica originale di AddFallPointAnnotation, verrebbe
+        disegnata una "linea rossa". Unisce indici consecutivi in un
+        unico intervallo e li evidenzia con regioni rosse trasparenti.
+        """
+        try:
+            falls = getattr(self, "falls", []) or []
+            if not falls:
+                # Niente da visualizzare, rimuove eventuali regioni
+                self.show_sensor_activations([])
+                return
+
+            def _classify_fall(fall_val: int) -> tuple[str | None, set[int]]:
+                """Calcola colore (red/green/None) e pannelli attivati in un solo passaggio."""
+                try:
+                    bits = int(fall_val)
+
+                    pane_titles = [
+                        self.TITLE_SPEED,
+                        self.TITLE_GYRO,
+                        self.TITLE_MAIN,
+                        self.TITLE_GRAVITY,
+                        self.TITLE_POSE,
+                    ]
+                    idx_gyro = pane_titles.index(self.TITLE_GYRO)
+                    idx_main = pane_titles.index(self.TITLE_MAIN)
+                    idx_grav = pane_titles.index(self.TITLE_GRAVITY)
+                    idx_pose = pane_titles.index(self.TITLE_POSE)
+
+                    color = None
+                    triggered: set[int] = set()
+                    if (bits & 0x1):
+                        triggered.add(idx_main)
+                    if (bits & 0x100):
+                        triggered.add(idx_gyro)
+                    if (bits & 0x1000):
+                        triggered.add(idx_grav)
+                    if (bits & 0x10000):
+                        triggered.add(idx_pose)
+
+                    # colore
+                    if triggered:
+                        color = "green"
+                        
+                    if self.is_critical_fall(bits):
+                        color = "red"
+                    
+                    pose_flag = (bits & 0x10000) != 0
+                    pose_critical_flag = (bits & 0x20000) != 0
+                    if pose_flag and pose_critical_flag:
+                        color = "red"
+
+                    return color, triggered
+                except Exception:
+                    return None, set()
+
+            # Ordina per indice crescente
+            falls_sorted = sorted(falls, key=lambda x: int(x.index))
+            intervals_by_plot_red: dict[int, list[tuple[int, int]]] = {}
+            intervals_by_plot_green: dict[int, list[tuple[int, int]]] = {}
+            state_red = {}
+            state_green = {}
+            gap_tolerance = 10
+
+            def _update_color_state(
+                idx: int,
+                color: str,
+                triggered_plots: set[int],
+                gap_tolerance: int,
+                state_dict: dict,
+                intervals_dict: dict[int, list[tuple[int, int]]],
+                color_name: str,
+            ) -> None:
+                plots_list = list(state_dict.keys() | (triggered_plots if color == color_name else set()))
+                for plot_idx in plots_list:
+                    st = state_dict.get(plot_idx)
+                    is_trigger = (color == color_name) and (plot_idx in triggered_plots)
+                    if is_trigger:
+                        if st is None:
+                            state_dict[plot_idx] = {"start": idx, "prev": idx, "gap": 0}
+                        else:
+                            # consecutivo
+                            if st["prev"] is not None and idx == st["prev"] + 1:
+                                st["prev"] = idx
+                                st["gap"] = 0
+                            else:
+                                # chiudi intervallo precedente
+                                intervals_dict.setdefault(plot_idx, []).append((st["start"], st["prev"]))
+                                state_dict[plot_idx] = {"start": idx, "prev": idx, "gap": 0}
+                    else:
+                        # non trigger: se c'è intervallo aperto, applica tolleranza
+                        if st is not None and st["prev"] is not None:
+                            if idx == st["prev"] + 1:
+                                st["gap"] += 1
+                                if st["gap"] > gap_tolerance:
+                                    intervals_dict.setdefault(plot_idx, []).append((st["start"], st["prev"]))
+                                    state_dict.pop(plot_idx, None)
+                            else:
+                                # salto grande: chiudi
+                                intervals_dict.setdefault(plot_idx, []).append((st["start"], st["prev"]))
+                                state_dict.pop(plot_idx, None)
+
+            for f in falls_sorted:
+                idx = int(f.index)
+                fall_val = int(f.fall)
+                color, triggered_plots = _classify_fall(fall_val)
+
+                # Aggiorna stato per ROSSO e VERDE con una sola funzione
+                _update_color_state(idx, color, triggered_plots, gap_tolerance, state_red, intervals_by_plot_red, "red")
+                _update_color_state(idx, color, triggered_plots, gap_tolerance, state_green, intervals_by_plot_green, "green")
+
+            # Chiudi intervalli rimasti aperti
+            for plot_idx, st in list(state_red.items()):
+                if st and st.get("start") is not None:
+                    intervals_by_plot_red.setdefault(plot_idx, []).append((st["start"], st["prev"] if st.get("prev") is not None else st["start"]))
+
+            for plot_idx, st in list(state_green.items()):
+                if st and st.get("start") is not None:
+                    intervals_by_plot_green.setdefault(plot_idx, []).append((st["start"], st["prev"] if st.get("prev") is not None else st["start"]))
+
+            def _merge_intervals(intervals: list[tuple[int,int]], max_gap: int = 5, min_width: int = 1) -> list[tuple[int,int]]:
+                if not intervals:
+                    return []
+                intervals = sorted(intervals, key=lambda t: t[0])
+                merged: list[tuple[int,int]] = []
+                cs, ce = intervals[0]
+                for s, e in intervals[1:]:
+                    # se il gap tra ce e s è piccolo, unisci
+                    if s - ce <= max_gap:
+                        ce = max(ce, e)
+                    else:
+                        if ce - cs < min_width:
+                            ce = cs + min_width
+                        merged.append((cs, ce))
+                        cs, ce = s, e
+                if ce - cs < min_width:
+                    ce = cs + min_width
+                merged.append((cs, ce))
+                return merged
+
+            for pidx, ints in list(intervals_by_plot_red.items()):
+                intervals_by_plot_red[pidx] = _merge_intervals(ints, max_gap=gap_tolerance, min_width=2)
+
+            for pidx, ints in list(intervals_by_plot_green.items()):
+                intervals_by_plot_green[pidx] = _merge_intervals(ints, max_gap=gap_tolerance, min_width=2)
+
+            # Clip verde rimuovendo sovrapposizioni con rosso
+            def _subtract_intervals(a: list[tuple[int,int]], b: list[tuple[int,int]]) -> list[tuple[int,int]]:
+                if not a:
+                    return []
+                if not b:
+                    return a
+                b_sorted = sorted(b, key=lambda t: t[0])
+                result: list[tuple[int,int]] = []
+                for s, e in sorted(a, key=lambda t: t[0]):
+                    segments = [(s, e)]
+                    for bs, be in b_sorted:
+                        new_segments = []
+                        for cs, ce in segments:
+                            # nessuna sovrapposizione
+                            if be < cs or bs > ce:
+                                new_segments.append((cs, ce))
+                            else:
+                                # taglia a sinistra
+                                if bs > cs:
+                                    new_segments.append((cs, bs - 1))
+                                # taglia a destra
+                                if be < ce:
+                                    new_segments.append((be + 1, ce))
+                        segments = [seg for seg in new_segments if seg[0] <= seg[1]]
+                        if not segments:
+                            break
+                    result.extend(segments)
+                return result
+
+            all_plot_idxs = set(intervals_by_plot_green.keys()) | set(intervals_by_plot_red.keys())
+            for pidx in all_plot_idxs:
+                greens = intervals_by_plot_green.get(pidx, [])
+                reds = intervals_by_plot_red.get(pidx, [])
+                intervals_by_plot_green[pidx] = _subtract_intervals(greens, reds)
+
+            self.show_colored_sensor_activations_by_plot({
+                "red": intervals_by_plot_red,
+                "green": intervals_by_plot_green,
+            })
+        except Exception as e:
+            print(f"set_critical_falls error: {e}")
+        
     def load_data(self, min_time: int, max_time: int):
         raise NotImplementedError
 
@@ -560,31 +782,39 @@ class SessionV2(BaseSession):
         sql = f"SELECT dataIndex, {col} FROM slowSensors WHERE dataIndex BETWEEN ? AND ? ORDER BY dataIndex"
         return self._get_series_from_db(sql, (min_index, max_index))
     
-    def get_slow_timestamp_range(self):
-     """
-     Restituisce il valore minimo e massimo di `Timestamp` presenti in `slowSensors`.
-     Ritorna:
-     - (min_ts, max_ts) come oggetti `datetime` se disponibili
-     - (None, None) se la tabella è vuota o i timestamp mancano
-     """
-     if self.conn is None:
-         return None, None
-     try:
-         cur = self.conn.cursor()
-         cur.execute(
-             "SELECT MIN(Timestamp), MAX(Timestamp) FROM slowSensors WHERE Timestamp IS NOT NULL"
-         )
-         row = cur.fetchone()
-         cur.close()
-         if not row or (row[0] is None and row[1] is None):
-             return None, None
-         min_str, max_str = row
-         min_ts = datetime.fromisoformat(min_str) if min_str else None
-         max_ts = datetime.fromisoformat(max_str) if max_str else None
-         return min_ts, max_ts
-     except Exception as e:
-         print(f"get_slow_timestamp_range error: {e}")
-         return None, None
+    def get_fast_timestamp_range(self):
+        """
+        Restituisce il valore minimo e massimo di `Timestamp` presenti in `fastSensors`.
+        Gestisce correttamente timezone/offset:
+        - Se la stringa del DB ha un offset (es. "+00:00"), converte in orario locale.
+        - Se è naive (senza offset), la interpreta come orario locale così com'è.
+        """
+        if self.conn is None:
+            return None, None
+        try:
+            cur = self.conn.cursor()
+            cur.execute(
+                "SELECT MIN(Timestamp), MAX(Timestamp) FROM fastSensors WHERE Timestamp IS NOT NULL"
+            )
+            row = cur.fetchone()
+            cur.close()
+            if not row or (row[0] is None and row[1] is None):
+                return None, None
+
+            def _parse_db_ts(s: str) -> datetime | None:
+                dt = datetime.fromisoformat(s)
+                try:
+                    return dt.replace(tzinfo=timezone.utc).astimezone()
+                except Exception:
+                    return dt
+
+            min_str, max_str = row
+            min_ts = _parse_db_ts(min_str)
+            max_ts = _parse_db_ts(max_str)
+            return min_ts, max_ts
+        except Exception as e:
+            print(f"get_fast_timestamp_range error: {e}")
+            return None, None
 
     def InitSessionPlotModel(self, series, axis: int = 2):
         """
@@ -598,7 +828,17 @@ class SessionV2(BaseSession):
         gyro_index = self.gyro_index            # 1
         speed_index = self.speed_index          # 2
 
-        min_ts, max_ts = self.get_slow_timestamp_range()
+        min_ts, max_ts = self.get_fast_timestamp_range()
+
+        # Wire RightPanel time refs so labels update correctly
+        try:
+            rp = getattr(self, 'right_panel', None)
+            if rp is not None:
+                min_idx = int(getattr(self, 'MinIndex', 0))
+                rp.set_session_time_refs(min_ts, min_idx)
+                rp.set_time_bounds(min_ts, max_ts)
+        except Exception:
+            pass
 
         def time_formatter_from_db(v: float) -> str:
             try:
@@ -613,6 +853,10 @@ class SessionV2(BaseSession):
                         frac = 1.0
                     ts = min_ts + (max_ts - min_ts) * frac
                     return ts.strftime("%H:%M:%S")
+                try:
+                    rp.set_index_bounds(int(self.MinIndex), int(self.MaxIndex))
+                except Exception:
+                    pass
                 return str(v)
             except Exception:
                 return str(v)
@@ -633,7 +877,7 @@ class SessionV2(BaseSession):
             self.TITLE_GRAVITY: 4,
         }
 
-        glw, plots, bottom_plot, _ = Graph.build_multiplot_dashboard(
+        self.glw, self.plots, bottom_plot, _ = Graph.build_multiplot_dashboard(
             pane_titles=pane_titles,
             bottom_formatter=time_formatter_from_db,
             right_panel=self.right_panel
@@ -648,7 +892,7 @@ class SessionV2(BaseSession):
         blue_pen = pg.mkPen(color=(80, 140, 255), width=LINE_WIDTH)
         white_pen = pg.mkPen('w', width=CURSOR_WIDTH)
         self._line_annotations = []
-        vlines = Graph.add_vertical_cursors(plots, white_pen)
+        vlines = Graph.add_vertical_cursors(self.plots, white_pen)
         self._line_annotations.extend(vlines)
 
         def update_cursor_lines(val):
@@ -662,7 +906,7 @@ class SessionV2(BaseSession):
                 for ln in vlines:
                     ln.setValue(data_idx)
                
-                for p in plots:
+                for p in self.plots:
                     vb = p.getViewBox()
                     x0, x1 = vb.viewRange()[0]
                     width = x1 - x0
@@ -674,26 +918,27 @@ class SessionV2(BaseSession):
         pens3 = [red_pen, green_pen, blue_pen]
         main_bucket = bucket_order_visual_to_series[self.TITLE_MAIN]
         main_plot_idx = pane_titles.index(self.TITLE_MAIN)
-        series[main_bucket] = Graph.add_curves(plots[main_plot_idx], 3, pens3, show_legend=True)
+        series[main_bucket] = Graph.add_curves(self.plots[main_plot_idx], 3, pens3, show_legend=True)
             
         gyro_bucket = bucket_order_visual_to_series[self.TITLE_GYRO]
         gyro_plot_idx = pane_titles.index(self.TITLE_GYRO)
-        series[gyro_bucket] = Graph.add_curves(plots[gyro_plot_idx], 3, pens3, show_legend=True)
+        series[gyro_bucket] = Graph.add_curves(self.plots[gyro_plot_idx], 3, pens3, show_legend=True)
 
         speed_bucket = bucket_order_visual_to_series[self.TITLE_SPEED]
         speed_plot_idx = pane_titles.index(self.TITLE_SPEED)
-        series[speed_bucket] = Graph.add_curves(plots[speed_plot_idx], 1, [red_pen], show_legend=True)
+        series[speed_bucket] = Graph.add_curves(self.plots[speed_plot_idx], 1, [red_pen], show_legend=True)
 
         pose_bucket = bucket_order_visual_to_series[self.TITLE_POSE]
         pose_plot_idx = pane_titles.index(self.TITLE_POSE)
-        series[pose_bucket] = Graph.add_curves(plots[pose_plot_idx], 3, pens3, show_legend=True)
+        series[pose_bucket] = Graph.add_curves(self.plots[pose_plot_idx], 3, pens3, show_legend=True)
 
         grav_bucket = bucket_order_visual_to_series[self.TITLE_GRAVITY]
         grav_plot_idx = pane_titles.index(self.TITLE_GRAVITY)
-        series[grav_bucket] = Graph.add_curves(plots[grav_plot_idx], 3, pens3, show_legend=True)
+        series[grav_bucket] = Graph.add_curves(self.plots[grav_plot_idx], 3, pens3, show_legend=True)
 
         Graph.connect_lod(bottom_plot, target_pts=2000)
-        self._plots = plots
+        self._plots = self.plots
+        self._activation_regions = []
 
     def apply_y_ticks(self):
         try:
@@ -725,6 +970,89 @@ class SessionV2(BaseSession):
                     return f"{v:.2f}"
                 ticks = [[(v, fmt(v)) for v in vals]]
                 p.getAxis('left').setTicks(ticks)
+        except Exception:
+            pass
+
+    def show_sensor_activations(self, intervals: list[tuple[int, int]]):
+        """
+        Disegna rettangoli rossi trasparenti su tutti i grafici per ogni intervallo (start_index, end_index).
+        """
+        try:
+            plots = getattr(self, "_plots", [])
+            if not plots:
+                return
+            # Rimuove regioni esistenti
+            try:
+                for plot_regions in getattr(self, "_activation_regions", []):
+                    for reg in plot_regions:
+                        try:
+                            plots[0].scene().removeItem(reg)
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+            # Aggiunge nuove regioni
+            self._activation_regions = Graph.add_time_regions(plots, intervals, color=(255, 0, 0, 80))
+        except Exception:
+            pass
+
+    def show_sensor_activations_by_plot(self, intervals_by_plot: dict[int, list[tuple[int, int]]]):
+        """
+        Disegna rettangoli rossi trasparenti solo sui grafici specificati da intervals_by_plot.
+        intervals_by_plot: dict plot_index -> list[(start_index, end_index)]
+        """
+        try:
+            plots = getattr(self, "_plots", [])
+            if not plots:
+                return
+            # Rimuovi regioni esistenti
+            try:
+                for plot_regions in getattr(self, "_activation_regions", []):
+                    for reg in plot_regions:
+                        try:
+                            plots[0].scene().removeItem(reg)
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+            self._activation_regions = []
+            # Aggiungi regioni per ciascun plot
+            for plot_idx, intervals in intervals_by_plot.items():
+                if plot_idx < 0 or plot_idx >= len(plots):
+                    continue
+                regs = Graph.add_time_regions([plots[plot_idx]], intervals, color=(255, 0, 0, 80))
+                self._activation_regions.append(regs)
+        except Exception:
+            pass
+
+    def show_colored_sensor_activations_by_plot(self, intervals_by_color: dict[str, dict[int, list[tuple[int, int]]]]):
+        """Disegna regioni per colore e pannello."""
+        try:
+            plots = getattr(self, "_plots", [])
+            if not plots:
+                return
+            try:
+                for plot_regions in getattr(self, "_activation_regions", []):
+                    for reg in plot_regions:
+                        try:
+                            plots[0].scene().removeItem(reg)
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+            self._activation_regions = []
+            color_map = {
+                "red": (255, 0, 0, 80),
+                "green": (0, 255, 0, 80),
+                "yellow": (255, 255, 0, 80),
+            }
+            for color_key, intervals_by_plot in intervals_by_color.items():
+                col = color_map.get(color_key, (255, 0, 0, 80))
+                for plot_idx, intervals in intervals_by_plot.items():
+                    if plot_idx < 0 or plot_idx >= len(plots):
+                        continue
+                    regs = Graph.add_time_regions([plots[plot_idx]], intervals, color=col)
+                    self._activation_regions.append(regs)
         except Exception:
             pass
 

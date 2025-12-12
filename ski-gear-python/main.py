@@ -27,7 +27,7 @@ class MainWindow(QMainWindow):
         center_layout.setSpacing(0)
 
         self.left_panel = LeftPanel.LeftPanel()
-        self.right_panel = RightPanel.RightPanel(self, self.left_panel.map_widget)
+        self.right_panel = RightPanel.RightPanel(self.left_panel.map_widget)
 
         self.app_menu = AppMenu.AppMenu(self, self.left_panel, self.right_panel)
 

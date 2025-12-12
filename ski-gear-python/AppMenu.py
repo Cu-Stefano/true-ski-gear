@@ -29,6 +29,12 @@ class AppMenu:
             deviceID = 0
             sessionID = 0
 
+            # Mostra in alto il file caricato
+            try:
+                self.main_window.setWindowTitle(f"Loading file - {selected_file}")
+            except Exception:
+                pass
+
             sV2 = SessionV2(deviceID, sessionID, selected_file, self.right_panel)
             # Carica nel DB
             sV2.ReadSessionFromFileV2(selected_file)
@@ -48,6 +54,14 @@ class AppMenu:
             _set_xyz(sV2.pose_index, lambda ax: sV2.get_pose_series(min_idx, max_idx, ax))
             _set_xyz(sV2.gravity_index, lambda ax: sV2.get_gravity_series(min_idx, max_idx, axis=ax))
             _set_xyz(sV2.speed_index, lambda ax: (sV2.get_speed_series(min_idx, max_idx) if ax == 0 else (None, None)))
+            sV2.update_critical_falls()
+            sV2.set_critical_falls()
+
+            # Aggiorna titolo dopo il caricamento
+            try:
+                self.main_window.setWindowTitle(f"Loaded file - {selected_file}")
+            except Exception:
+                pass
             
 
     def create_menu(self):

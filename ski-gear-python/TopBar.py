@@ -6,17 +6,18 @@ import logging
 import Utilities
 
 class TopBar(QWidget):
-    # Signals for actions to avoid tight coupling
     updatePortsRequested = Signal()
-    connectRequested = Signal(str)  # selected port
+    connectRequested = Signal(str) 
     disconnectRequested = Signal()
     
     def on_update_ports(self):
         logging.getLogger(__name__).info("Update ports requested")
         self.updatePortsRequested.emit()
+        
     def on_connect(self):
         logging.getLogger(__name__).info("Connect requested")
         self.connectRequested.emit(self.port_select.currentText())
+        
     def on_disconnect(self):
         logging.getLogger(__name__).info("Disconnect requested")
         self.disconnectRequested.emit()
